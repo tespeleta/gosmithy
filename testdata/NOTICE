@@ -1,0 +1,17 @@
+gosmithy testdata
+=================
+
+The Smithy IDL fixture corpus under testdata/loader/ is derived from the
+Smithy project:
+
+  https://github.com/awslabs/smithy
+  smithy-model/src/test/resources/software/amazon/smithy/model/loader/
+
+Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+
+The fixtures are licensed under the Apache License, Version 2.0. A copy of
+the license is provided in testdata/LICENSE. Only the `.smithy` fixture files
+were copied; JSON model files and other test resources are not included.
+
+The fixture files themselves are unmodified. CLASSIFICATION.md is original to
+gosmithy and documents which fixtures the Milestone 1 parser covers.
