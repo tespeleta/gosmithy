@@ -19,6 +19,11 @@ func (v Version) String() string {
 }
 
 func (v Version) atLeast(other Version) bool {
+	return v.AtLeast(other)
+}
+
+// AtLeast reports whether v is greater than or equal to other.
+func (v Version) AtLeast(other Version) bool {
 	if v.Major != other.Major {
 		return v.Major > other.Major
 	}

@@ -1,7 +1,29 @@
 # Milestone 2 — Semantic model and structural validation
 
-Status: planned · Estimate: **7 dev-days** · Depends on: Milestone 1
+Status: implemented · Estimate: **7 dev-days** · Depends on: Milestone 1
 Deliverable: `gosmithy validate` and `gosmithy model` over real Smithy models.
+
+> **Implementation note (2026-11-14).** The semantic model, prelude, assembler,
+> mixin flattening, service closure, structural validators, and CLI commands are
+> implemented. All 81 non-2.1 valid fixtures assemble with no DANGER events
+> (the 18 valid 2.1 fixtures are parsed but not assembled, plus one fixture that
+> declares 2.1), and all 27 semantic invalid fixtures produce the expected event
+> category at the expected source location. Mixin flattening is additionally
+> compared against every upstream `.flattened.smithy` fixture.
+>
+> Two implementation choices differ from the sketch below:
+>
+> - `validation.Event` is an alias of `model.Diagnostic`. This keeps the
+>   dependency direction `idl → model → validation` without an import cycle;
+>   the assembler can record diagnostics while validation adds checks.
+> - IDL 2.1 semantics remain out of scope. Inline collection targets are parsed
+>   and their leaf references are resolved so unresolved-target fixtures report
+>   `Model.UnresolvedShape`; synthetic collection shapes are not created.
+>
+> Event IDs are stable constants in `validation`: `Model.UnresolvedShape`,
+> `Model.InvalidMember`, `Model.InvalidMixin`, `Model.InvalidEnum`,
+> `SyntacticShapeIdTarget`, and so on. `gosmithy validate` exits 1 when any
+> DANGER event survives severity filtering.
 
 ---
 
@@ -264,21 +286,21 @@ exceeds ~15 checks, introduce a `Validator` interface; not before.
 
 ## 6. Acceptance criteria
 
-- [ ] `go test ./...` and `go vet ./...` pass.
-- [ ] Prelude loads from the embedded real `prelude.smithy`.
-- [ ] The weather example assembles; shape IDs, members, input/output, errors,
+- [x] `go test ./...` and `go vet ./...` pass.
+- [x] Prelude loads from the embedded real `prelude.smithy`.
+- [x] The weather example assembles; shape IDs, members, input/output, errors,
       and resource lifecycle operations resolve as expected.
-- [ ] All non-2.1 valid fixtures assemble, with a documented skip list for
+- [x] All non-2.1 valid fixtures assemble, with a documented skip list for
       JSON-AST-dependent cases. The one shared `__shared.json` fixture is ported
       to an IDL helper for tests (no JSON AST loader yet).
-- [ ] All semantic invalid fixtures classified in M1 emit the expected event
+- [x] All semantic invalid fixtures classified in M1 emit the expected event
       category and source location.
-- [ ] `gosmithy validate` exits 0 on valid models and 1 on DANGER.
-- [ ] `gosmithy model --json` is deterministic across runs.
-- [ ] Every member shape is reachable from its container and has a source
+- [x] `gosmithy validate` exits 0 on valid models and 1 on DANGER.
+- [x] `gosmithy model --json` is deterministic across runs.
+- [x] Every member shape is reachable from its container and has a source
       location.
-- [ ] No codegen packages imported by `model`.
-- [ ] No AWS-specific code or trait names in `model`/`validation`.
+- [x] No codegen packages imported by `model`.
+- [x] No AWS-specific code or trait names in `model`/`validation`.
 
 **Demo**
 

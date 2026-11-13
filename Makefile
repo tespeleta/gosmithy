@@ -6,6 +6,10 @@
 #   make fuzz       run the parser fuzzer for FUZZTIME seconds
 
 GO        ?= go
+# The sandbox's default ~/.cache/go-build is read-only; keep the Go build cache
+# inside the repository (gitignored) so build/test/vet can write it.
+GOCACHE   ?= $(CURDIR)/.gocache
+export GOCACHE
 BIN_DIR   ?= bin
 BIN       ?= $(BIN_DIR)/gosmithy
 VERSION   ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.1.0-dev)

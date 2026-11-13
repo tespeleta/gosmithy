@@ -1,7 +1,7 @@
 # gosmithy — plan
 
 Module: `github.com/tespeleta/gosmithy`
-Status: proposal v2 · 2026-11-13 · Milestone 1 implemented
+Status: proposal v2 · 2026-11-14 · Milestones 1–2 implemented
 
 A Go implementation of the Smithy IDL and a pluggable code generator. It reads
 Smithy models and generates Go types, validators, clients, and servers.
@@ -402,8 +402,9 @@ Decisions still open:
 
 ## 7. Next action
 
-Milestone 1 is implemented; see
-[`docs/plan/01-parser-foundation.md`](docs/plan/01-parser-foundation.md).
-The next action is **Milestone 2**:
+Milestones 1 and 2 are implemented; see
+[`docs/plan/01-parser-foundation.md`](docs/plan/01-parser-foundation.md) and
 [`docs/plan/02-semantic-model.md`](docs/plan/02-semantic-model.md).
+The next action is **Milestone 3**:
+[`docs/plan/03-codegen-core-and-go.md`](docs/plan/03-codegen-core-and-go.md).
 No codegen, no protocols, no AWS yet.

@@ -837,7 +837,7 @@ func (p *parser) parseEnumShape(stmt *ShapeStmt) {
 	p.skipWs()
 
 	for p.tok.Kind != TokenEOF && p.tok.Kind != TokenRBrace {
-		traits, doc, _, _ := p.parseDocsAndTraitsBeforeShape(true)
+		traits, doc, docSrc, _ := p.parseDocsAndTraitsBeforeShape(true)
 		memberLoc := p.loc()
 		p.expect(TokenIdentifier)
 		name := p.tok.Lexeme
@@ -846,9 +846,10 @@ func (p *parser) parseEnumShape(stmt *ShapeStmt) {
 		}
 
 		member := Member{
-			Name:   name,
-			Source: memberLoc,
-			Doc:    doc,
+			Name:      name,
+			Source:    memberLoc,
+			Doc:       doc,
+			DocSource: docSrc,
 		}
 		member.Traits = traitsToTraitSlice(traits)
 

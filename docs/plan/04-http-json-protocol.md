@@ -103,6 +103,8 @@ gen/
 - HTTP/2-specific behavior.
 - `@httpChecksumRequired`, `@requestCompression`.
 - Full content negotiation; only `application/json` and raw payload media types.
+- JSON AST loader (parsing Smithy JSON AST models). Deferred until after M4;
+  see §10.
 
 ---
 
@@ -484,3 +486,65 @@ go run ./cmd/gosmithy generate \
 - Round-trip/snapshot/golden tests.
 - The complete original goal: parser, model, validators, client, server — all
   generic Smithy, no AWS.
+
+---
+
+## 10. Deferred to the end: JSON AST loader
+
+**Status: not part of M1–M4.** This is the first post-M4 follow-up, after the
+protocol, client, and server work is complete. It is recorded here so it is not
+lost and so the remaining conformance gap is explicit.
+
+### Why it is not on the M4 critical path
+
+The M2 plan already put the JSON AST *loader* out of scope
+([`02-semantic-model.md`](02-semantic-model.md)). M2 tests compensate by:
+
+- asserting that every non-2.1 `.smithy` fixture assembles without DANGER
+  events;
+- comparing mixin output against the upstream `.flattened.smithy` fixtures,
+  which are IDL-in/IDL-out and need no JSON loader;
+- porting the one cross-file input dependency, upstream's `valid/__shared.json`,
+  to [`testdata/shared.smithy`](../../testdata/shared.smithy).
+
+Nothing in M3 (Go types/validators) or M4 (HTTP+JSON client/server) consumes a
+JSON AST. Codegen and the protocol runtime work from the in-memory
+`model.Model`. Our `gosmithy model --json` output is a **debug serializer**, not
+a Smithy JSON AST, and is not an inverse of a future loader.
+
+### What the loader buys
+
+Loading JSON AST models is what lets the project use the upstream corpus at full
+strength:
+
+- ingest `.json` models directly (`gosmithy validate model.json`);
+- copy the 81 upstream expected `valid/**/*.json` files into `testdata/` and
+  assert that assembling the matching `.smithy` file produces exactly the same
+  semantic model, instead of the current no-DANGER and focused-property checks;
+- load `__shared.json` directly and retire the IDL port;
+- support users who already have models in JSON AST form.
+
+### Sketch of the work
+
+- Parse the JSON AST envelope: `smithy` version, `metadata`, `shapes`.
+- Parse every shape type and member, including service/resource/operation
+  properties and trait values, into the existing `idl` AST or directly into
+  `model`-layer definitions. Reuse the existing resolver, merge rules, trait
+  coercion, and structural validators.
+- Treat shape IDs in JSON AST as absolute; no `use` statements or relative-ID
+  resolution are involved.
+- Add a CLI path for `.json` inputs without changing the IDL parser contract.
+- Tests: one comparison test per upstream expected `.json` fixture, plus
+  focused loader tests for metadata, traits, member shapes, and services; run
+  the existing 27 invalid semantic fixtures through the JSON AST path where an
+  upstream JSON equivalent exists.
+- Keep `model --json` as-is; JSON AST *output* is a separate question and is not
+  required by this task.
+
+### Why it is last
+
+It is the only remaining piece of upstream conformance that does not unblock
+either codegen or the protocol. Finishing M4 first keeps the critical path
+(parser → model → validators → client/server) intact; the loader is then a
+self-contained addition that strengthens the test suite without changing the
+generated code.

@@ -11,7 +11,7 @@ The upstream corpus is version-aware. M1 implements the Smithy 2.0 grammar
 plus the 2.1 syntax additions (member indexes, inline collections, and tagged
 string literals). Semantic assembly and validation are M2 work, so invalid
 fixtures whose expected failure comes from assembly/validation are skipped by
-the M1 harness.
+the parser harness and asserted by the M2 tests instead.
 
 ## Counts
 
@@ -21,7 +21,7 @@ the M1 harness.
 | Valid fixtures using 2.1 syntax/version | 18 |
 | Invalid fixtures | 207 |
 | Invalid syntax fixtures checked by M1 | 180 |
-| Invalid semantic fixtures deferred to M2 | 27 |
+| Invalid semantic fixtures covered by M2 | 27 |
 
 ## Valid 2.1 fixtures
 
@@ -47,10 +47,12 @@ syntax. All of them parse with the M1 parser.
 - `valid/2/tagged-literals.smithy`
 - `valid/shape-id-does-not-conflict-with-tagged-literals.smithy`
 
-## Invalid semantic fixtures (deferred to M2)
+## Invalid semantic fixtures (matched by M2 assembly/validation)
 
-The parser accepts these files; the expected error is produced later by
-semantic assembly, shape resolution, or model validation.
+The parser accepts these files; the expected error is produced by semantic
+assembly, shape resolution, or model validation. M2 runs each one in
+`model/semantic_invalid_test.go` and asserts the event ID, message, and source
+line. The parser harness still skips them, as it only asserts parser errors.
 
 - `invalid/2.1/inline-collection-unresolved-target-list.smithy`
 - `invalid/2.1/inline-collection-unresolved-target-map-key.smithy`
