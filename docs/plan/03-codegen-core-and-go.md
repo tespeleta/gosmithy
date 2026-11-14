@@ -1,8 +1,30 @@
 # Milestone 3 — Codegen core and Go models/validators
 
-Status: planned · Estimate: **6 dev-days** · Depends on: Milestone 2
+Status: implemented · Estimate: **6 dev-days** · Depends on: Milestone 2
 Deliverable: a pluggable generator contract and the first real target: Go types
 and validators.
+
+> **Implementation note (2026-11-14).** The `codegen` contract, registry,
+> runner, CLI `generate`, Go generator, embedded `internal/smithy` runtime,
+> golden tests, generated-module compile tests, and generated validator
+> behavior tests are implemented. Two fixtures cover the surface:
+> `testdata/weather.smithy` for the demo and `testdata/validators.smithy` for
+> every supported constraint and Go type.
+>
+> Small deviations from the sketch below, all internal:
+>
+> - `Runner.Run` returns a `*RunResult` as well as an error so the CLI can print
+>   an exact written/skipped/diagnostic summary. DANGER diagnostics still abort
+>   before any file is written.
+> - The generator receives its module path through `Request.Options["module"]`,
+>   matching the `--opt` mechanism the contract already defined.
+> - Named collections get `Validate` and an unexported `validateContents`
+>   helper. The helper lets a member override the target collection's own
+>   constraints without losing element validation.
+> - `types.Unit` is always emitted so Milestone 4 can use `*types.Unit` in
+>   operation signatures.
+> - Union validation is intentionally omitted, per §4.8. Map keys are not
+>   validated; values are.
 
 ---
 
@@ -418,17 +440,17 @@ Known limitations (document in generated package or docs):
 
 ## 6. Acceptance criteria
 
-- [ ] `go build ./...`, `go test ./...`, `go vet ./...` pass.
-- [ ] `gosmithy generate` runs the `go` plugin and writes a module.
-- [ ] Generated module compiles with `go build ./...` and has no external deps.
-- [ ] Weather model generates structures, enums, unions (if present), errors,
+- [x] `go build ./...`, `go test ./...`, `go vet ./...` pass.
+- [x] `gosmithy generate` runs the `go` plugin and writes a module.
+- [x] Generated module compiles with `go build ./...` and has no external deps.
+- [x] Weather model generates structures, enums, unions (if present), errors,
       and validators.
-- [ ] Required, length, range, pattern, uniqueItems, and nested validation
+- [x] Required, length, range, pattern, uniqueItems, and nested validation
       behave correctly in generated tests.
-- [ ] Generated output is deterministic; golden tests pass with `-update` off.
-- [ ] Duplicate path/conflict detection works.
-- [ ] No client/server/protocol code is generated.
-- [ ] No AWS-specific names or behavior in the generator.
+- [x] Generated output is deterministic; golden tests pass with `-update` off.
+- [x] Duplicate path/conflict detection works.
+- [x] No client/server/protocol code is generated.
+- [x] No AWS-specific names or behavior in the generator.
 
 **Demo**
 

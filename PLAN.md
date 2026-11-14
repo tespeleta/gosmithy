@@ -1,7 +1,7 @@
 # gosmithy — plan
 
 Module: `github.com/tespeleta/gosmithy`
-Status: proposal v2 · 2026-11-14 · Milestones 1–2 implemented
+Status: proposal v2 · 2026-11-14 · Milestones 1–3 implemented
 
 A Go implementation of the Smithy IDL and a pluggable code generator. It reads
 Smithy models and generates Go types, validators, clients, and servers.
@@ -342,7 +342,7 @@ IDs, forward references, mixins, inline I/O, merge/conflict rules, service
 closure, minimal structural validation. Exit: prelude + weather + 2.0 fixtures
 assemble; `gosmithy validate` reports usable events.
 
-**M3 — Codegen core + Go models/validators.**
+**M3 — Codegen core + Go models/validators. Implemented.**
 `codegen.Generator` contract, registry, runner, CLI `generate`, Go naming/type
 mapping/writer, structs/enums/intEnums/unions/errors, `Validate()` methods,
 embedded `internal/smithy` runtime, golden and compile tests. Exit: generated
@@ -402,9 +402,10 @@ Decisions still open:
 
 ## 7. Next action
 
-Milestones 1 and 2 are implemented; see
-[`docs/plan/01-parser-foundation.md`](docs/plan/01-parser-foundation.md) and
-[`docs/plan/02-semantic-model.md`](docs/plan/02-semantic-model.md).
-The next action is **Milestone 3**:
+Milestones 1–3 are implemented; see
+[`docs/plan/01-parser-foundation.md`](docs/plan/01-parser-foundation.md),
+[`docs/plan/02-semantic-model.md`](docs/plan/02-semantic-model.md), and
 [`docs/plan/03-codegen-core-and-go.md`](docs/plan/03-codegen-core-and-go.md).
-No codegen, no protocols, no AWS yet.
+The next action is **Milestone 4**:
+[`docs/plan/04-http-json-protocol.md`](docs/plan/04-http-json-protocol.md).
+No protocols, clients, servers, or AWS yet.

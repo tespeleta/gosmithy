@@ -46,6 +46,8 @@ func run(args []string) error {
 		return runValidate(args[1:])
 	case "model":
 		return runModel(args[1:])
+	case "generate":
+		return runGenerate(args[1:])
 	case "help", "-h", "--help":
 		printUsage(os.Stdout)
 		return nil
@@ -62,6 +64,7 @@ Commands:
   parse <file>...      Parse Smithy IDL files and print their AST as JSON
   validate <file>...   Assemble and validate a Smithy model
   model <file>...      Assemble a Smithy model and print it
+  generate <file>...   Generate code for a service from a Smithy model
   version              Print the gosmithy version
   help                 Print this help
 
@@ -69,6 +72,8 @@ Examples:
   gosmithy parse testdata/weather.smithy
   gosmithy validate testdata/weather.smithy
   gosmithy model --json testdata/weather.smithy
+  gosmithy generate --service example.weather#Weather \\
+      --generator go --module example.com/weather --out ./gen testdata/weather.smithy
   gosmithy validate testdata/loader/valid/main-test.smithy
 `)
 }

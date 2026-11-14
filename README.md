@@ -13,12 +13,13 @@ A Go implementation of the Smithy IDL and a pluggable code generator.
 
 ## Status
 
-**Milestones 1 and 2 are implemented:** the parser covers the full IDL 2.0
-grammar plus the 2.1 syntax additions, and the semantic model assembles the
-prelude, fixtures, mixins, inline I/O, and service closures. Structural
-validation reports unresolved references, invalid members, invalid operation
-I/O and errors, mixin problems, enum problems, and syntactic shape IDs.
-Code generation is Milestone 3.
+**Milestones 1–3 are implemented:** the parser covers the full IDL 2.0 grammar
+plus the 2.1 syntax additions; the semantic model assembles the prelude,
+fixtures, mixins, inline I/O, and service closures; structural validation
+reports unresolved references, invalid members, invalid operation I/O and
+errors, mixin problems, enum problems, and syntactic shape IDs; and the `go`
+code generator emits a self-contained Go module with data types and
+validators. Clients and servers are Milestone 4.
 
 Fixture results against the upstream Smithy corpus:
 
@@ -40,6 +41,9 @@ make build
 ./bin/gosmithy parse testdata/loader/valid/main-test.smithy
 ./bin/gosmithy validate testdata/weather.smithy
 ./bin/gosmithy model --json testdata/weather.smithy | head
+./bin/gosmithy generate --service example.weather#Weather \
+    --generator go --module example.com/weather --out ./gen testdata/weather.smithy
+(cd gen && go build ./... && go test ./...)
 ```
 
 `make` builds `bin/gosmithy` with `-trimpath` and injects the version from
@@ -127,6 +131,78 @@ identifiers in node values) are resolved to absolute shape IDs and marked with
   to `testdata/shared.smithy` for tests.
 - No model transforms or projections.
 
+## Code generation
+
+Milestone 3 adds the plugin contract and the Go target. A generator receives
+one request and returns files; it never writes to disk:
+
+```go
+type Generator interface {
+    Generate(ctx context.Context, req *Request) (*Response, error)
+}
+
+type Request struct {
+    Model    *model.Model
+    Service  model.ShapeID
+    Version  model.Version
+    Target   Target
+    Protocol *Protocol          // nil until Milestone 4
+    Options  map[string]string
+    Files    []string
+}
+```
+
+`codegen.Runner` calls the selected generators with the same request, merges
+their files, rejects paths outside the output directory, detects duplicate
+paths with differing content, and writes only after every generator succeeds.
+DANGER diagnostics abort the run.
+
+```console
+$ ./bin/gosmithy generate --service example.weather#Weather \
+    --generator go --module example.com/weather --out ./gen \
+    testdata/weather.smithy
+6 file(s) written, 0 skipped, 0 diagnostic(s)
+
+$ find gen -type f | sort
+gen/go.mod
+gen/internal/smithy/validate.go
+gen/types/enums.go
+gen/types/types.go
+gen/types/unions.go
+gen/types/validate.go
+```
+
+The generated module uses only the standard library. The `go` generator maps
+Smithy simple shapes to Go scalars, structures to structs (optional members are
+pointers or nilable slices/maps), lists/sets and maps to named collection types,
+enums/intEnums to named string/int32 types with constants and `Values()`,
+unions to an interface plus wrapper structs, and errors to structs implementing
+`error`, `ErrorCode()`, and `ErrorFault()`. Every structure, error, and named
+collection has a `Validate()` method covering `@required`, `@length`, `@range`,
+`@pattern`, `@uniqueItems`, and nested shapes. Member constraints override the
+same constraint on the target shape; nested failure paths look like
+`nested.field`, `items[0]`, or `index[key]`.
+
+`--list-generators` lists the registry, and repeatable `--opt key=value` flags
+pass generator-specific options. `testdata/validators.smithy` exercises every
+supported type and constraint; `testdata/library.smithy` is a realistic example
+with enums, an intEnum, a union, errors, lists, and maps; and
+`testdata/weather.smithy` is the smallest demo model.
+
+### Known M3 limitations
+
+- `@default` and `@clientOptional` are parsed but not applied to types or
+  values yet.
+- No client, server, protocol, or HTTP binding code is generated.
+- Union values are not validated; map keys are not validated (map values are).
+- Validators do not detect cycles: callers must not build cyclic values.
+- `@pattern` uses Go's RE2 syntax. Patterns that RE2 cannot compile fail
+  generation with a clear error.
+- `@length` counts Unicode code points for strings and bytes for blobs.
+- `@range` on `bigInteger` and `bigDecimal` is not generated.
+- IDL 2.1 inline collection targets are not generated yet because M2 does not
+  create their synthetic collection shapes.
+
 ## Parser API
 
 ```go
@@ -160,11 +236,14 @@ file, err := idl.ParseWithOptions("weather.smithy", src, idl.Options{
 ## Packages
 
 ```text
-cmd/gosmithy/   CLI: parse, validate, model, version, help
+cmd/gosmithy/   CLI: parse, validate, model, generate, version, help
+codegen/        generator contract, registry, runner, conflict detection
+codegen/golang/ Go target: naming, type mapping, types, validators, tests
+internal/runtime/ source for the generated internal/smithy package
 idl/            tokenizer, AST, parser, fixture and fuzz tests
 model/          semantic model, prelude, assembly, mixins, service closure
 validation/     structural validators and events
-testdata/loader upstream Smithy fixture corpus + classification
+testdata/       fixture corpus, weather and validators models, golden codegen output
 docs/plan/      one markdown per milestone
 ```
 
@@ -209,6 +288,15 @@ The fixture harness lives in `idl/fixtures_test.go`:
 The semantic model tests also assemble every non-2.1 valid fixture and compare
 flattened mixin models against the upstream `.flattened.smithy` fixtures.
 
+The `codegen/golang` tests generate the weather and validator fixtures, compare
+them against `codegen/golang/testdata/golden/<case>`, compile and vet the
+generated modules, and run generated validator behavior tests in a temporary
+module. Update golden output intentionally with:
+
+```sh
+go test ./codegen/golang -run TestGolden -update
+```
+
 A short fuzz smoke run:
 
 ```sh
@@ -226,7 +314,7 @@ one document:
 2. [Semantic model](docs/plan/02-semantic-model.md) — resolution, prelude,
    mixins, closures, structural validation. **Implemented.**
 3. [Codegen core + Go models](docs/plan/03-codegen-core-and-go.md) — plugin
-   contract, Go types and validators.
+   contract, Go types and validators. **Implemented.**
 4. [Generic HTTP+JSON](docs/plan/04-http-json-protocol.md) — `httpJson`
    protocol, generated client and server.
 
