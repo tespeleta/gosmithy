@@ -12,6 +12,8 @@ import (
 	"github.com/tespeleta/gosmithy/idl"
 	"github.com/tespeleta/gosmithy/internal/runtime"
 	"github.com/tespeleta/gosmithy/model"
+	"github.com/tespeleta/gosmithy/model/httpbinding"
+	"github.com/tespeleta/gosmithy/protocol/httpjson"
 	"github.com/tespeleta/gosmithy/validation"
 )
 
@@ -39,12 +41,21 @@ type generator struct {
 	packageNames map[string]model.ShapeID
 	// constantNames tracks generated enum constant names.
 	constantNames map[string]model.ShapeID
+	// unionWrappers maps union member shape IDs to wrapper struct names.
+	unionWrappers map[model.ShapeID]string
 
 	diagnostics []codegen.Diagnostic
 
 	// patterns maps distinct @pattern values to package-level variable names.
 	patterns     map[string]string
 	patternOrder []string
+
+	// Protocol generation state. bindings is empty for model-only requests.
+	protocol       *codegen.Protocol
+	bindings       []*httpbinding.Binding
+	operationNames map[model.ShapeID]string
+	rootPackage    string
+	localCounter   int
 }
 
 // Generate implements codegen.Generator.
@@ -73,6 +84,7 @@ func (g *generator) Generate(ctx context.Context, req *codegen.Request) (*codege
 	g.fieldNames = make(map[model.ShapeID]string)
 	g.packageNames = make(map[string]model.ShapeID)
 	g.constantNames = make(map[string]model.ShapeID)
+	g.unionWrappers = make(map[model.ShapeID]string)
 	g.patterns = make(map[string]string)
 
 	g.module = strings.TrimRight(strings.TrimSpace(req.Options["module"]), "/")
@@ -92,13 +104,36 @@ func (g *generator) Generate(ctx context.Context, req *codegen.Request) (*codege
 	g.buildTypeNames()
 	g.buildFieldNames()
 
+	if req.Protocol != nil {
+		g.protocol = req.Protocol
+		g.rootPackage = goPackageName(g.module)
+		if !httpjson.Is(req.Protocol.ID) {
+			g.diagnosticAt(validation.Danger, service.Source,
+				"Unsupported protocol `%s`; the Go generator currently implements %s", req.Protocol.ID, httpjson.TraitID)
+		} else {
+			bindings, events := httpbinding.Index(g.m, service.ID)
+			g.bindings = bindings
+			for _, event := range events {
+				g.diagnostics = append(g.diagnostics, codegen.Diagnostic{
+					Severity: event.Severity,
+					Message:  event.Message,
+					Path:     event.Source.Filename,
+					Line:     event.Source.Line,
+					Column:   event.Source.Column,
+				})
+			}
+			g.buildOperationNames()
+			g.checkServiceProtocol()
+		}
+	}
+
 	files := make([]codegen.File, 0, 8)
 	files = append(files, codegen.File{
 		Path:    "go.mod",
 		Content: []byte(fmt.Sprintf("module %s\n\ngo 1.22\n", g.module)),
 	})
 
-	runtimeFiles, err := runtime.Files()
+	runtimeFiles, err := runtime.FilesFor(req.Protocol != nil)
 	if err != nil {
 		return nil, err
 	}
@@ -135,6 +170,33 @@ func (g *generator) Generate(ctx context.Context, req *codegen.Request) (*codege
 		return nil, fmt.Errorf("golang: generating types/validate.go: %w", err)
 	}
 	files = append(files, codegen.File{Path: "types/validate.go", Content: validateFile})
+
+	jsonFile, err := g.emitJSONFile()
+	if err != nil {
+		return nil, fmt.Errorf("golang: generating types/json.go: %w", err)
+	}
+	if jsonFile != nil {
+		files = append(files, codegen.File{Path: "types/json.go", Content: jsonFile})
+	}
+
+	if g.protocol != nil && httpjson.Is(g.protocol.ID) {
+		protocolFiles := []struct {
+			path string
+			emit func() ([]byte, error)
+		}{
+			{"service.go", g.emitServiceFile},
+			{"protocol.go", g.emitProtocolFile},
+			{"client.go", g.emitClientFile},
+			{"server.go", g.emitServerFile},
+		}
+		for _, item := range protocolFiles {
+			content, err := item.emit()
+			if err != nil {
+				return nil, fmt.Errorf("golang: generating %s: %w", item.path, err)
+			}
+			files = append(files, codegen.File{Path: item.path, Content: content})
+		}
+	}
 
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 	return &codegen.Response{Files: files, Diagnostics: g.diagnostics}, nil
@@ -181,6 +243,34 @@ func (g *generator) selectShapes(closure []model.ShapeID) {
 		g.shapes = append(g.shapes, shape)
 	}
 	sort.Slice(g.shapes, func(i, j int) bool { return g.shapes[i].ID.String() < g.shapes[j].ID.String() })
+}
+
+// buildOperationNames assigns the Go method name for every operation in the
+// service closure and reports collisions. It is used by the protocol emitters.
+func (g *generator) buildOperationNames() {
+	g.operationNames = make(map[model.ShapeID]string)
+	used := make(map[string]model.ShapeID)
+	for _, bundle := range g.bindings {
+		op, ok := g.m.Shape(bundle.Operation)
+		if !ok || op.Type != model.TypeOperation {
+			continue
+		}
+		name := safeTypeName(g.rawShapeName(op.ID))
+		if previous, exists := used[name]; exists && previous != op.ID {
+			g.diagnosticAt(validation.Danger, op.Source,
+				"Go operation method name %q for `%s` collides with `%s`; use the service `rename` map to disambiguate",
+				name, op.ID, previous)
+		}
+		used[name] = op.ID
+		g.operationNames[op.ID] = name
+	}
+}
+
+func (g *generator) operationGoName(op *model.Shape) string {
+	if name, ok := g.operationNames[op.ID]; ok {
+		return name
+	}
+	return safeTypeName(g.rawShapeName(op.ID))
 }
 
 func (g *generator) isDataShape(shape *model.Shape) bool {
@@ -266,6 +356,14 @@ func (g *generator) fieldName(member *model.Shape) string {
 		return name
 	}
 	return safeFieldName(g.rawMemberName(member))
+}
+
+// memberJSONName returns the JSON object key for a member, honoring @jsonName.
+func (g *generator) memberJSONName(member *model.Shape) string {
+	if name, ok := member.JSONName(); ok && name != "" {
+		return name
+	}
+	return member.ID.Member
 }
 
 func (g *generator) diagnostic(severity validation.Severity, loc idl.SourceLocation, format string, args ...any) {
@@ -375,7 +473,8 @@ func (g *generator) memberFieldType(member *model.Shape, w *fileWriter) (string,
 func fieldHasPointerWrapper(target *model.Shape) bool {
 	switch target.Type {
 	case model.TypeBlob, model.TypeList, model.TypeSet, model.TypeMap,
-		model.TypeDocument, model.TypeBigInteger, model.TypeBigDecimal:
+		model.TypeDocument, model.TypeBigInteger, model.TypeBigDecimal,
+		model.TypeUnion:
 		return false
 	default:
 		return true
@@ -441,6 +540,10 @@ func (g *generator) pointerize(typ string, target *model.Shape, w *fileWriter) s
 		return typ
 	case model.TypeBigInteger, model.TypeBigDecimal:
 		return typ
+	case model.TypeUnion:
+		// A union is a Go interface; a nil interface already represents an
+		// absent sparse element.
+		return typ
 	case model.TypeList, model.TypeSet, model.TypeMap:
 		if _, named := g.typeNames[target.ID]; named {
 			return "*" + typ
@@ -471,8 +574,11 @@ func (g *generator) unionValueType(member *model.Shape, w *fileWriter) (string, 
 		return "", false
 	}
 	switch target.Type {
-	case model.TypeStructure, model.TypeUnion, model.TypeList, model.TypeSet, model.TypeMap:
+	case model.TypeStructure, model.TypeList, model.TypeSet, model.TypeMap:
 		return "*" + typ, true
+	case model.TypeUnion:
+		// A union is an interface; storing it directly is nilable.
+		return typ, true
 	default:
 		return typ, true
 	}

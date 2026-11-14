@@ -11,6 +11,7 @@ import (
 	"github.com/tespeleta/gosmithy/codegen"
 	"github.com/tespeleta/gosmithy/codegen/golang"
 	"github.com/tespeleta/gosmithy/model"
+	"github.com/tespeleta/gosmithy/protocol/httpjson"
 	"github.com/tespeleta/gosmithy/validation"
 )
 
@@ -29,13 +30,14 @@ func runGenerate(args []string) error {
 	fs.SetOutput(os.Stderr)
 	generatorName := fs.String("generator", golang.GeneratorName, "code generator to run")
 	service := fs.String("service", "", "service shape ID to generate")
+	protocolName := fs.String("protocol", "", "wire protocol to generate (for example gosmithy.protocols#httpJson)")
 	module := fs.String("module", "", "Go module path for the generated module")
 	out := fs.String("out", "", "output directory")
 	list := fs.Bool("list-generators", false, "list registered generators and exit")
 	var rawOptions optionFlags
 	fs.Var(&rawOptions, "opt", "generator option key=value (repeatable)")
 	fs.Usage = func() {
-		fmt.Fprintln(fs.Output(), "Usage: gosmithy generate --service <id> --module <path> --out <dir> [flags] <file>...")
+		fmt.Fprintln(fs.Output(), "Usage: gosmithy generate --service <id> --module <path> --out <dir> [--protocol <id>] [flags] <file>...")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -91,6 +93,20 @@ func runGenerate(args []string) error {
 	if err != nil {
 		return err
 	}
+
+	var selectedProtocol *codegen.Protocol
+	if *protocolName != "" {
+		protocol, definition, err := httpjson.Select(*protocolName)
+		if err != nil {
+			return err
+		}
+		selectedProtocol = protocol
+		// The protocol definition is an embedded model. It is assembled with
+		// the user's files so that an explicit @httpJson application resolves,
+		// but the CLI selection remains authoritative.
+		files = append(files, definition)
+	}
+
 	m, err := model.Assemble(files, model.Options{})
 	if err != nil {
 		return err
@@ -113,9 +129,10 @@ func runGenerate(args []string) error {
 		return fmt.Errorf("unknown generator %q (available: %s)", *generatorName, registry.String())
 	}
 	req := &codegen.Request{
-		Model:   m,
-		Service: serviceID,
-		Version: model.V2_0,
+		Model:    m,
+		Service:  serviceID,
+		Version:  model.V2_0,
+		Protocol: selectedProtocol,
 		Target: codegen.Target{
 			Name:       *generatorName,
 			Generators: []string{*generatorName},

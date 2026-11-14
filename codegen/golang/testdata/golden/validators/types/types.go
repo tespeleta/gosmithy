@@ -99,7 +99,7 @@ type Thing struct {
 	Attributes   Attributes   `json:"attributes,omitempty"`
 	Nested       *Nested      `json:"nested,omitempty"`
 	Kind         *ThingKind   `json:"kind,omitempty"`
-	Shape        *Shape       `json:"shape,omitempty"`
+	Shape        Shape        `json:"shape,omitempty"`
 	Priority     *Priority    `json:"priority,omitempty"`
 	Size         *Size        `json:"size,omitempty"`
 	OptionalTags OptionalTags `json:"optionalTags,omitempty"`

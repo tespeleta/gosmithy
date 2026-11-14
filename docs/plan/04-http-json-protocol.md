@@ -1,8 +1,35 @@
 # Milestone 4 — Generic HTTP+JSON protocol, client, and server
 
-Status: planned · Estimate: **9 dev-days** · Depends on: Milestone 3
+Status: implemented · Estimate: **9 dev-days** · Depends on: Milestone 3
 Deliverable: generated Go clients and servers for the project's own generic
 HTTP+JSON protocol.
+
+> **Implementation note (2026-11-14).** The protocol model
+> (`protocol/httpjson`), HTTP binding index (`model/httpbinding`), runtime
+> helpers, generated service/client/server/protocol files, custom JSON codecs,
+> golden/compile tests, and an `httptest` round-trip suite are implemented.
+> `testdata/http.smithy` exercises every binding, timestamp format, unions, big
+> numbers, validation failures, modeled errors, and protocol errors; the
+> smaller `testdata/library.smithy` is the demo service.
+>
+> Deliberate implementation details and deviations from the sketch:
+>
+> - `epoch-milliseconds` is supported as an extension and was added to the
+>   prelude's `timestampFormat` enum; the other three formats are the upstream
+>   Smithy values.
+> - The server base path option is `WithServerBasePath`, because the root
+>   package also contains the client's `WithBasePath` option.
+> - Prefix-header suffixes are lowercased on both sides. HTTP header names are
+>   case-insensitive, so preserving the original map key case is not portable.
+> - `internal/smithy/json.go` (timestamps, big decimals) is emitted for
+>   model-only generation too, because custom type codecs use it;
+>   `internal/smithy/http.go` is emitted only when a protocol is selected.
+> - Body members bound to HTTP locations are removed from the JSON body by
+>   copying the input/output struct and clearing those fields before marshaling;
+>   unknown JSON fields are ignored on decode.
+> - `@httpQueryParams` excludes keys that are explicitly bound with `@httpQuery`.
+> - A payload cannot be combined with unbound body members; the binding index
+>   reports a DANGER diagnostic for that model.
 
 ---
 
@@ -432,20 +459,20 @@ A little repetition is fine; debuggability matters more.
 
 ## 7. Acceptance criteria
 
-- [ ] `go build ./...`, `go test ./...`, `go vet ./...` pass.
-- [ ] `gosmithy generate --protocol gosmithy.protocols#httpJson` produces a
+- [x] `go build ./...`, `go test ./...`, `go vet ./...` pass.
+- [x] `gosmithy generate --protocol gosmithy.protocols#httpJson` produces a
       compilable module with server and client.
-- [ ] Round-trip passes for:
+- [x] Round-trip passes for:
       path labels, query params, headers, prefix headers, JSON input/output,
       blob payload, modeled client error, modeled server error, unknown error,
       validation failure, empty input/output.
-- [ ] Request snapshots assert method, path, query, selected headers, and body.
-- [ ] URI routes reject overlapping patterns at generation time.
-- [ ] Wrong method → 405; unknown route → 404; malformed body → 400.
-- [ ] Timestamp formats round-trip for all four formats.
-- [ ] Generated code has no external dependencies.
-- [ ] Generated code is deterministic and golden-tested.
-- [ ] No AWS-specific trait, header, protocol, or code path exists.
+- [x] Request snapshots assert method, path, query, selected headers, and body.
+- [x] URI routes reject overlapping patterns at generation time.
+- [x] Wrong method → 405; unknown route → 404; malformed body → 400.
+- [x] Timestamp formats round-trip for all four formats.
+- [x] Generated code has no external dependencies.
+- [x] Generated code is deterministic and golden-tested.
+- [x] No AWS-specific trait, header, protocol, or code path exists.
 
 **Demo**
 

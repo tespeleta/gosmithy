@@ -8,18 +8,21 @@ service Library {
     operations: [GetBook, Search, ListBooks]
 }
 
+@http(method: "GET", uri: "/books/{isbn}")
 operation GetBook {
     input: GetBookInput
     output: GetBookOutput
     errors: [BookNotFound]
 }
 
+@http(method: "POST", uri: "/books/search")
 operation Search {
     input: SearchInput
     output: SearchOutput
     errors: [BookNotFound]
 }
 
+@http(method: "GET", uri: "/books")
 operation ListBooks {
     input: ListBooksInput
     output: ListBooksOutput
@@ -125,6 +128,7 @@ map Shelf {
 
 structure GetBookInput {
     @required
+    @httpLabel
     isbn: ISBN
 }
 
@@ -155,6 +159,7 @@ list GenreList {
 
 structure ListBooksInput {
     @length(min: 1, max: 20)
+    @httpQuery("genre")
     genres: GenreList
 }
 

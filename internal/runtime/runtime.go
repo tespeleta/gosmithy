@@ -11,9 +11,17 @@ import (
 //go:embed templates/*.go
 var templates embed.FS
 
-// Files returns the runtime files to emit, keyed by output path relative to the
-// generated module root, for example "internal/smithy/validate.go".
-func Files() (map[string][]byte, error) {
+// Files returns the runtime files for model-only generation. It is equivalent
+// to FilesFor(false).
+func Files() (map[string][]byte, error) { return FilesFor(false) }
+
+// FilesFor returns the runtime files to emit, keyed by output path relative to
+// the generated module root, for example "internal/smithy/validate.go".
+//
+// The JSON, timestamp, and big-decimal helpers are always included because
+// generated type codecs use them. The HTTP protocol helpers are included only
+// when protocol is true.
+func FilesFor(protocol bool) (map[string][]byte, error) {
 	entries, err := fs.ReadDir(templates, "templates")
 	if err != nil {
 		return nil, fmt.Errorf("runtime: reading templates: %w", err)
@@ -21,6 +29,9 @@ func Files() (map[string][]byte, error) {
 	out := make(map[string][]byte, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() {
+			continue
+		}
+		if entry.Name() == "http.go" && !protocol {
 			continue
 		}
 		data, err := fs.ReadFile(templates, "templates/"+entry.Name())

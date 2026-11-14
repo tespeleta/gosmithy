@@ -1,7 +1,7 @@
 # gosmithy — plan
 
 Module: `github.com/tespeleta/gosmithy`
-Status: proposal v2 · 2026-11-14 · Milestones 1–3 implemented
+Status: proposal v2 · 2026-11-14 · Milestones 1–4 implemented
 
 A Go implementation of the Smithy IDL and a pluggable code generator. It reads
 Smithy models and generates Go types, validators, clients, and servers.
@@ -321,8 +321,8 @@ and the parser are not, so they are one milestone.
 
 - **MVP boundary: end of Milestone 3.** Parsing, validation, Go models, and
   validators are already a real tool.
-- **Full original goal: end of Milestone 4.** Generated server and client, using
-  our own generic protocol.
+- **Full original goal: end of Milestone 4 (implemented).** Generated server and
+  client, using our own generic protocol.
 - Milestones 1–3 are the critical path; Milestone 4 can be deferred without
   blocking the parser/model/codegen foundation.
 
@@ -348,7 +348,7 @@ mapping/writer, structs/enums/intEnums/unions/errors, `Validate()` methods,
 embedded `internal/smithy` runtime, golden and compile tests. Exit: generated
 module compiles and validates sample data.
 
-**M4 — Generic HTTP+JSON.**
+**M4 — Generic HTTP+JSON. Implemented.**
 `gosmithy.protocols#httpJson` trait, HTTP binding index, request/response
 codec, generated client and server, routing, errors, validation → 400,
 round-trip tests over `httptest`. Exit: a realistic service generates, compiles,
@@ -402,10 +402,12 @@ Decisions still open:
 
 ## 7. Next action
 
-Milestones 1–3 are implemented; see
+Milestones 1–4 are implemented; see
 [`docs/plan/01-parser-foundation.md`](docs/plan/01-parser-foundation.md),
-[`docs/plan/02-semantic-model.md`](docs/plan/02-semantic-model.md), and
-[`docs/plan/03-codegen-core-and-go.md`](docs/plan/03-codegen-core-and-go.md).
-The next action is **Milestone 4**:
-[`docs/plan/04-http-json-protocol.md`](docs/plan/04-http-json-protocol.md).
-No protocols, clients, servers, or AWS yet.
+[`docs/plan/02-semantic-model.md`](docs/plan/02-semantic-model.md),
+[`docs/plan/03-codegen-core-and-go.md`](docs/plan/03-codegen-core-and-go.md), and
+[`docs/plan/04-http-json-protocol.md`](docs/plan/04-http-json-protocol.md), plus
+the protocol guide in [`docs/http-json-protocol.md`](docs/http-json-protocol.md).
+The first post-M4 follow-up is the JSON AST loader described in
+[`docs/plan/04-http-json-protocol.md`](docs/plan/04-http-json-protocol.md#10-deferred-to-the-end-json-ast-loader).
+No AWS protocols, traits, or code paths are part of the project.

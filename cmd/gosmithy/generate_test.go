@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -24,12 +25,13 @@ func TestGenerateWeather(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
-	if !strings.Contains(output, "6 file(s) written") {
+	if !strings.Contains(output, "7 file(s) written") {
 		t.Errorf("output = %q, want file summary", output)
 	}
 	for _, name := range []string{
 		"go.mod",
 		"internal/smithy/validate.go",
+		"internal/smithy/json.go",
 		"types/types.go",
 		"types/enums.go",
 		"types/unions.go",
@@ -152,5 +154,97 @@ func TestGenerateInvalidOption(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "key=value") {
 		t.Fatalf("error = %v, want key=value", err)
+	}
+}
+
+func TestGenerateLibraryHTTP(t *testing.T) {
+	library := filepath.Join("..", "..", "testdata", "library.smithy")
+	out := filepath.Join(t.TempDir(), "gen")
+	output, err := captureStdout(t, func() error {
+		return run([]string{
+			"generate",
+			"--service", "example.library#Library",
+			"--generator", "go",
+			"--protocol", "gosmithy.protocols#httpJson",
+			"--module", "example.com/library",
+			"--out", out,
+			library,
+		})
+	})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if !strings.Contains(output, "written") {
+		t.Errorf("output = %q, want file summary", output)
+	}
+	for _, name := range []string{
+		"go.mod",
+		"service.go",
+		"client.go",
+		"server.go",
+		"protocol.go",
+		"internal/smithy/http.go",
+		"internal/smithy/json.go",
+		"types/types.go",
+	} {
+		if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(name))); err != nil {
+			t.Errorf("missing generated file %s: %v", name, err)
+		}
+	}
+	runGoCommand(t, out, "build", "./...")
+	runGoCommand(t, out, "test", "./...")
+}
+
+func TestGenerateUnknownProtocol(t *testing.T) {
+	library := filepath.Join("..", "..", "testdata", "library.smithy")
+	_, err := captureStdout(t, func() error {
+		return run([]string{
+			"generate",
+			"--service", "example.library#Library",
+			"--protocol", "aws#restJson1",
+			"--module", "example.com/library",
+			"--out", t.TempDir(),
+			library,
+		})
+	})
+	if err == nil || !strings.Contains(err.Error(), "unknown protocol") {
+		t.Fatalf("error = %v, want unknown protocol", err)
+	}
+}
+
+func TestGenerateModelOnlyHasNoProtocolCode(t *testing.T) {
+	library := filepath.Join("..", "..", "testdata", "library.smithy")
+	out := filepath.Join(t.TempDir(), "gen")
+	if _, err := captureStdout(t, func() error {
+		return run([]string{
+			"generate",
+			"--service", "example.library#Library",
+			"--module", "example.com/library",
+			"--out", out,
+			library,
+		})
+	}); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	for _, name := range []string{"client.go", "server.go", "service.go", "protocol.go", "internal/smithy/http.go"} {
+		if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(name))); err == nil {
+			t.Errorf("model-only generation wrote protocol file %s", name)
+		}
+	}
+}
+
+func runGoCommand(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("go", args...)
+	cmd.Dir = dir
+	env := os.Environ()
+	if os.Getenv("GOCACHE") == "" {
+		env = append(env, "GOCACHE="+t.TempDir())
+	}
+	env = append(env, "GOWORK=off")
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go %s failed: %v\n%s", strings.Join(args, " "), err, out)
 	}
 }

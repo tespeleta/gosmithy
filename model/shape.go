@@ -9,6 +9,16 @@ import (
 // ShapeType is the type of a shape in the semantic model.
 type ShapeType string
 
+// Timestamp format values accepted by @timestampFormat. The httpJson protocol
+// defaults to TimestampDateTime; TimestampEpochMilliseconds is an extension
+// defined by this project.
+const (
+	TimestampDateTime          = "date-time"
+	TimestampEpochSeconds      = "epoch-seconds"
+	TimestampEpochMilliseconds = "epoch-milliseconds"
+	TimestampHTTPDate          = "http-date"
+)
+
 const (
 	TypeBlob       ShapeType = "blob"
 	TypeBoolean    ShapeType = "boolean"
@@ -38,68 +48,69 @@ const (
 
 // Trait IDs for the prelude traits used by the model, validation, and codegen.
 var (
-	TraitBlob           = MustShapeID("smithy.api#blob")
-	TraitBoolean        = MustShapeID("smithy.api#boolean")
-	TraitDocument       = MustShapeID("smithy.api#document")
-	TraitString         = MustShapeID("smithy.api#string")
-	TraitByte           = MustShapeID("smithy.api#byte")
-	TraitShort          = MustShapeID("smithy.api#short")
-	TraitInteger        = MustShapeID("smithy.api#integer")
-	TraitLong           = MustShapeID("smithy.api#long")
-	TraitFloat          = MustShapeID("smithy.api#float")
-	TraitDouble         = MustShapeID("smithy.api#double")
-	TraitBigInteger     = MustShapeID("smithy.api#bigInteger")
-	TraitBigDecimal     = MustShapeID("smithy.api#bigDecimal")
-	TraitTimestamp      = MustShapeID("smithy.api#timestamp")
-	TraitUnit           = MustShapeID("smithy.api#Unit")
-	TraitDocumentation  = MustShapeID("smithy.api#documentation")
-	TraitTrait          = MustShapeID("smithy.api#trait")
-	TraitMixin          = MustShapeID("smithy.api#mixin")
-	TraitRequired       = MustShapeID("smithy.api#required")
-	TraitError          = MustShapeID("smithy.api#error")
-	TraitInput          = MustShapeID("smithy.api#input")
-	TraitOutput         = MustShapeID("smithy.api#output")
-	TraitPrivate        = MustShapeID("smithy.api#private")
-	TraitEnumValue      = MustShapeID("smithy.api#enumValue")
-	TraitDefault        = MustShapeID("smithy.api#default")
-	TraitSensitive      = MustShapeID("smithy.api#sensitive")
-	TraitDeprecated     = MustShapeID("smithy.api#deprecated")
-	TraitInternal       = MustShapeID("smithy.api#internal")
-	TraitReadonly       = MustShapeID("smithy.api#readonly")
-	TraitIdempotent     = MustShapeID("smithy.api#idempotent")
-	TraitSparse         = MustShapeID("smithy.api#sparse")
-	TraitUnitType       = MustShapeID("smithy.api#unitType")
-	TraitIDRef          = MustShapeID("smithy.api#idRef")
-	TraitTags           = MustShapeID("smithy.api#tags")
-	TraitSince          = MustShapeID("smithy.api#since")
-	TraitTitle          = MustShapeID("smithy.api#title")
-	TraitExternalDocs   = MustShapeID("smithy.api#externalDocumentation")
-	TraitUnstable       = MustShapeID("smithy.api#unstable")
-	TraitPaginated      = MustShapeID("smithy.api#paginated")
-	TraitReferences     = MustShapeID("smithy.api#references")
-	TraitEnum           = MustShapeID("smithy.api#enum")
-	TraitHTTP           = MustShapeID("smithy.api#http")
-	TraitHTTPLabel      = MustShapeID("smithy.api#httpLabel")
-	TraitHTTPQuery      = MustShapeID("smithy.api#httpQuery")
-	TraitHTTPHeader     = MustShapeID("smithy.api#httpHeader")
-	TraitHTTPPrefix     = MustShapeID("smithy.api#httpPrefixHeaders")
-	TraitHTTPPayload    = MustShapeID("smithy.api#httpPayload")
-	TraitHTTPResponse   = MustShapeID("smithy.api#httpResponseCode")
-	TraitHTTPError      = MustShapeID("smithy.api#httpError")
-	TraitProtocolDef    = MustShapeID("smithy.api#protocolDefinition")
-	TraitRetryable      = MustShapeID("smithy.api#retryable")
-	TraitStreaming      = MustShapeID("smithy.api#streaming")
-	TraitXMLName        = MustShapeID("smithy.api#xmlName")
-	TraitJSONName       = MustShapeID("smithy.api#jsonName")
-	TraitMediaType      = MustShapeID("smithy.api#mediaType")
-	TraitTimestampFmt   = MustShapeID("smithy.api#timestampFormat")
-	TraitLength         = MustShapeID("smithy.api#length")
-	TraitRange          = MustShapeID("smithy.api#range")
-	TraitPattern        = MustShapeID("smithy.api#pattern")
-	TraitUniqueItems    = MustShapeID("smithy.api#uniqueItems")
-	TraitBox            = MustShapeID("smithy.api#box")
-	TraitClientOptional = MustShapeID("smithy.api#clientOptional")
-	TraitAddedDefault   = MustShapeID("smithy.api#addedDefault")
+	TraitBlob            = MustShapeID("smithy.api#blob")
+	TraitBoolean         = MustShapeID("smithy.api#boolean")
+	TraitDocument        = MustShapeID("smithy.api#document")
+	TraitString          = MustShapeID("smithy.api#string")
+	TraitByte            = MustShapeID("smithy.api#byte")
+	TraitShort           = MustShapeID("smithy.api#short")
+	TraitInteger         = MustShapeID("smithy.api#integer")
+	TraitLong            = MustShapeID("smithy.api#long")
+	TraitFloat           = MustShapeID("smithy.api#float")
+	TraitDouble          = MustShapeID("smithy.api#double")
+	TraitBigInteger      = MustShapeID("smithy.api#bigInteger")
+	TraitBigDecimal      = MustShapeID("smithy.api#bigDecimal")
+	TraitTimestamp       = MustShapeID("smithy.api#timestamp")
+	TraitUnit            = MustShapeID("smithy.api#Unit")
+	TraitDocumentation   = MustShapeID("smithy.api#documentation")
+	TraitTrait           = MustShapeID("smithy.api#trait")
+	TraitMixin           = MustShapeID("smithy.api#mixin")
+	TraitRequired        = MustShapeID("smithy.api#required")
+	TraitError           = MustShapeID("smithy.api#error")
+	TraitInput           = MustShapeID("smithy.api#input")
+	TraitOutput          = MustShapeID("smithy.api#output")
+	TraitPrivate         = MustShapeID("smithy.api#private")
+	TraitEnumValue       = MustShapeID("smithy.api#enumValue")
+	TraitDefault         = MustShapeID("smithy.api#default")
+	TraitSensitive       = MustShapeID("smithy.api#sensitive")
+	TraitDeprecated      = MustShapeID("smithy.api#deprecated")
+	TraitInternal        = MustShapeID("smithy.api#internal")
+	TraitReadonly        = MustShapeID("smithy.api#readonly")
+	TraitIdempotent      = MustShapeID("smithy.api#idempotent")
+	TraitSparse          = MustShapeID("smithy.api#sparse")
+	TraitUnitType        = MustShapeID("smithy.api#unitType")
+	TraitIDRef           = MustShapeID("smithy.api#idRef")
+	TraitTags            = MustShapeID("smithy.api#tags")
+	TraitSince           = MustShapeID("smithy.api#since")
+	TraitTitle           = MustShapeID("smithy.api#title")
+	TraitExternalDocs    = MustShapeID("smithy.api#externalDocumentation")
+	TraitUnstable        = MustShapeID("smithy.api#unstable")
+	TraitPaginated       = MustShapeID("smithy.api#paginated")
+	TraitReferences      = MustShapeID("smithy.api#references")
+	TraitEnum            = MustShapeID("smithy.api#enum")
+	TraitHTTP            = MustShapeID("smithy.api#http")
+	TraitHTTPLabel       = MustShapeID("smithy.api#httpLabel")
+	TraitHTTPQuery       = MustShapeID("smithy.api#httpQuery")
+	TraitHTTPQueryParams = MustShapeID("smithy.api#httpQueryParams")
+	TraitHTTPHeader      = MustShapeID("smithy.api#httpHeader")
+	TraitHTTPPrefix      = MustShapeID("smithy.api#httpPrefixHeaders")
+	TraitHTTPPayload     = MustShapeID("smithy.api#httpPayload")
+	TraitHTTPResponse    = MustShapeID("smithy.api#httpResponseCode")
+	TraitHTTPError       = MustShapeID("smithy.api#httpError")
+	TraitProtocolDef     = MustShapeID("smithy.api#protocolDefinition")
+	TraitRetryable       = MustShapeID("smithy.api#retryable")
+	TraitStreaming       = MustShapeID("smithy.api#streaming")
+	TraitXMLName         = MustShapeID("smithy.api#xmlName")
+	TraitJSONName        = MustShapeID("smithy.api#jsonName")
+	TraitMediaType       = MustShapeID("smithy.api#mediaType")
+	TraitTimestampFmt    = MustShapeID("smithy.api#timestampFormat")
+	TraitLength          = MustShapeID("smithy.api#length")
+	TraitRange           = MustShapeID("smithy.api#range")
+	TraitPattern         = MustShapeID("smithy.api#pattern")
+	TraitUniqueItems     = MustShapeID("smithy.api#uniqueItems")
+	TraitBox             = MustShapeID("smithy.api#box")
+	TraitClientOptional  = MustShapeID("smithy.api#clientOptional")
+	TraitAddedDefault    = MustShapeID("smithy.api#addedDefault")
 )
 
 // Trait is an applied trait. Traits are generic: the value is a resolved node.
@@ -493,6 +504,9 @@ func (s *Shape) HTTPQuery() (string, bool) {
 	}
 	return t.Value.AsString()
 }
+
+// HTTPQueryParams reports whether the member is bound to the query string.
+func (s *Shape) HTTPQueryParams() bool { return s.HasTrait(TraitHTTPQueryParams) }
 
 // HTTPHeader returns the @httpHeader member name.
 func (s *Shape) HTTPHeader() (string, bool) {

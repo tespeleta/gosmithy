@@ -45,7 +45,7 @@ type Request struct {
 	// Target names the target being generated and lists its generators.
 	Target Target
 	// Protocol is the selected wire protocol, or nil for model-only
-	// generation. Milestone 3 never sets it.
+	// generation.
 	Protocol *Protocol
 	// Options holds generator-specific key/value options.
 	Options map[string]string
@@ -61,8 +61,9 @@ type Target struct {
 	Generators []string
 }
 
-// Protocol identifies a wire protocol implementation. It is a placeholder in
-// Milestone 3; protocol code generation belongs to Milestone 4.
+// Protocol identifies a wire protocol implementation. The protocol's trait
+// shape ID is enough for a generator to select its implementation; the CLI
+// assembles the protocol definition model with the user's files.
 type Protocol struct {
 	ID model.ShapeID
 }

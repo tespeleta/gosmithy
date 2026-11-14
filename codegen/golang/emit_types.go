@@ -52,7 +52,7 @@ func (g *generator) emitStructure(w *fileWriter, shape *model.Shape) {
 			if !ok || typ == "" {
 				typ = "any"
 			}
-			w.Line("%s %s `json:%q`", g.fieldName(member), typ, member.ID.Member+",omitempty")
+			w.Line("%s %s `json:%q`", g.fieldName(member), typ, g.memberJSONName(member)+",omitempty")
 		}
 		w.Out()
 		w.Line("}")

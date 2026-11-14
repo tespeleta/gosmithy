@@ -74,6 +74,9 @@ Examples:
   gosmithy model --json testdata/weather.smithy
   gosmithy generate --service example.weather#Weather \\
       --generator go --module example.com/weather --out ./gen testdata/weather.smithy
+  gosmithy generate --service example.library#Library \\
+      --generator go --protocol gosmithy.protocols#httpJson \\
+      --module example.com/library --out ./gen testdata/library.smithy
   gosmithy validate testdata/loader/valid/main-test.smithy
 `)
 }

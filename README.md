@@ -7,19 +7,21 @@ A Go implementation of the Smithy IDL and a pluggable code generator.
 - Assemble a semantic model: prelude, namespaces, `use`, forward references,
   `apply`, mixins, inline operation I/O, duplicate merging, and service closures.
 - Validate the structural properties codegen depends on.
-- Generate Go types, validators, and (later) HTTP+JSON clients and servers.
+- Generate Go types, validators, and HTTP+JSON clients and servers.
 - Generators implement a small Buf-inspired request/response interface.
 - Generated modules are self-contained and use only the standard library.
 
 ## Status
 
-**Milestones 1–3 are implemented:** the parser covers the full IDL 2.0 grammar
+**Milestones 1–4 are implemented:** the parser covers the full IDL 2.0 grammar
 plus the 2.1 syntax additions; the semantic model assembles the prelude,
 fixtures, mixins, inline I/O, and service closures; structural validation
 reports unresolved references, invalid members, invalid operation I/O and
-errors, mixin problems, enum problems, and syntactic shape IDs; and the `go`
+errors, mixin problems, enum problems, and syntactic shape IDs; the `go`
 code generator emits a self-contained Go module with data types and
-validators. Clients and servers are Milestone 4.
+validators; and `gosmithy.protocols#httpJson` adds an HTTP binding index,
+generated clients and servers, JSON value codecs, and protocol errors. See
+[`docs/http-json-protocol.md`](docs/http-json-protocol.md).
 
 Fixture results against the upstream Smithy corpus:
 
@@ -44,6 +46,12 @@ make build
 ./bin/gosmithy generate --service example.weather#Weather \
     --generator go --module example.com/weather --out ./gen testdata/weather.smithy
 (cd gen && go build ./... && go test ./...)
+
+# HTTP+JSON client and server
+./bin/gosmithy generate --service example.library#Library \
+    --generator go --protocol gosmithy.protocols#httpJson \
+    --module example.com/library --out ./gen-http testdata/library.smithy
+(cd gen-http && go build ./...)
 ```
 
 `make` builds `bin/gosmithy` with `-trimpath` and injects the version from
@@ -133,8 +141,9 @@ identifiers in node values) are resolved to absolute shape IDs and marked with
 
 ## Code generation
 
-Milestone 3 adds the plugin contract and the Go target. A generator receives
-one request and returns files; it never writes to disk:
+Milestones 3 and 4 add the plugin contract, the Go target, and the HTTP+JSON
+protocol. A generator receives one request and returns files; it never writes
+to disk:
 
 ```go
 type Generator interface {
@@ -146,7 +155,7 @@ type Request struct {
     Service  model.ShapeID
     Version  model.Version
     Target   Target
-    Protocol *Protocol          // nil until Milestone 4
+    Protocol *Protocol          // nil for model-only generation
     Options  map[string]string
     Files    []string
 }
@@ -161,10 +170,11 @@ DANGER diagnostics abort the run.
 $ ./bin/gosmithy generate --service example.weather#Weather \
     --generator go --module example.com/weather --out ./gen \
     testdata/weather.smithy
-6 file(s) written, 0 skipped, 0 diagnostic(s)
+7 file(s) written, 0 skipped, 0 diagnostic(s)
 
 $ find gen -type f | sort
 gen/go.mod
+gen/internal/smithy/json.go
 gen/internal/smithy/validate.go
 gen/types/enums.go
 gen/types/types.go
@@ -186,18 +196,43 @@ same constraint on the target shape; nested failure paths look like
 `--list-generators` lists the registry, and repeatable `--opt key=value` flags
 pass generator-specific options. `testdata/validators.smithy` exercises every
 supported type and constraint; `testdata/library.smithy` is a realistic example
-with enums, an intEnum, a union, errors, lists, and maps; and
+with enums, an intEnum, a union, errors, lists, maps, and HTTP bindings; and
 `testdata/weather.smithy` is the smallest demo model.
 
-### Known M3 limitations
+### HTTP+JSON clients and servers
+
+Selecting `--protocol gosmithy.protocols#httpJson` adds `service.go`,
+`client.go`, `server.go`, `protocol.go`, and the HTTP runtime. Operations use
+`@http` plus the standard `@httpLabel`, `@httpQuery`, `@httpQueryParams`,
+`@httpHeader`, `@httpPrefixHeaders`, `@httpPayload`, `@httpResponseCode`, and
+`@httpError` traits. Unbound members are JSON-body fields; `@jsonName`,
+`@mediaType`, and all four timestamp formats are honored. The generated server
+validates input and maps validation failures to 400 `ValidationException`;
+unknown routes, wrong methods, malformed bodies, body limits, modeled errors,
+and unhandled errors all use the documented JSON error envelope. See
+[`docs/http-json-protocol.md`](docs/http-json-protocol.md) for the protocol
+guide and generated API.
+
+`testdata/http.smithy` exercises every binding and error path. The Go generator
+tests generate it into a temporary module and run an `httptest` round trip for
+labels, query parameters, headers, prefix headers, JSON bodies, blob payloads,
+unions, big numbers, timestamps, modeled errors, unknown errors, validation
+failures, and empty operations.
+
+### Known limitations
 
 - `@default` and `@clientOptional` are parsed but not applied to types or
   values yet.
-- No client, server, protocol, or HTTP binding code is generated.
 - Union values are not validated; map keys are not validated (map values are).
 - Validators do not detect cycles: callers must not build cyclic values.
 - `@pattern` uses Go's RE2 syntax. Patterns that RE2 cannot compile fail
   generation with a clear error.
+- The HTTP+JSON protocol has no AWS compatibility, signing, authentication,
+  retries, streaming, event streams, compression, or multipart support.
+- Prefix-header suffix keys are lowercased because HTTP header names are
+  case-insensitive.
+- There is no JSON AST loader; the M4 follow-up is described in
+  [`docs/plan/04-http-json-protocol.md`](docs/plan/04-http-json-protocol.md).
 - `@length` counts Unicode code points for strings and bytes for blobs.
 - `@range` on `bigInteger` and `bigDecimal` is not generated.
 - IDL 2.1 inline collection targets are not generated yet because M2 does not
@@ -316,13 +351,14 @@ one document:
 3. [Codegen core + Go models](docs/plan/03-codegen-core-and-go.md) — plugin
    contract, Go types and validators. **Implemented.**
 4. [Generic HTTP+JSON](docs/plan/04-http-json-protocol.md) — `httpJson`
-   protocol, generated client and server.
+   protocol, generated client and server. **Implemented.**
 
 ## Attribution
 
 The fixture corpus under `testdata/loader/` is derived from the Smithy Java
 repository and is licensed under Apache-2.0. See
 [`testdata/NOTICE`](testdata/NOTICE) and [`testdata/LICENSE`](testdata/LICENSE).
-The embedded prelude in [`model/prelude.smithy`](model/prelude.smithy) is
-copied verbatim from `smithy-model/src/main/resources/.../prelude.smithy` in
-the same repository and is licensed under Apache-2.0.
+The embedded prelude in [`model/prelude.smithy`](model/prelude.smithy) is based
+on `smithy-model/src/main/resources/.../prelude.smithy` in the same repository,
+with one gosmithy extension (`EPOCH_MILLISECONDS` in `timestampFormat`), and is
+licensed under Apache-2.0.

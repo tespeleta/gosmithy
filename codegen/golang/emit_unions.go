@@ -56,8 +56,12 @@ func (g *generator) emitUnion(w *fileWriter, shape *model.Shape, name string) {
 }
 
 // unionWrapperName returns a package-unique wrapper struct name for a union
-// member.
+// member. Names are cached so that repeated emitter passes (type declarations
+// and JSON codecs) agree.
 func (g *generator) unionWrapperName(union *model.Shape, unionName string, member *model.Shape) string {
+	if name, ok := g.unionWrappers[member.ID]; ok {
+		return name
+	}
 	base := unionName + pascalCase(g.rawMemberName(member))
 	name := base
 	for i := 2; g.packageNameTaken(name); i++ {
@@ -67,6 +71,7 @@ func (g *generator) unionWrapperName(union *model.Shape, unionName string, membe
 		name = fmt.Sprintf("%s_%d", base, i)
 	}
 	g.packageNames[name] = union.ID
+	g.unionWrappers[member.ID] = name
 	return name
 }
 

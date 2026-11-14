@@ -1483,6 +1483,12 @@ enum timestampFormat {
     /// with decimal precision (for example, 1515531081.1234).
     EPOCH_SECONDS = "epoch-seconds"
 
+    /// The number of milliseconds that have elapsed since 00:00:00 Coordinated
+    /// Universal Time (UTC), Thursday, 1 January 1970 (for example,
+    /// 1515531081123). This value is a gosmithy extension used by the
+    /// httpJson protocol.
+    EPOCH_MILLISECONDS = "epoch-milliseconds"
+
     /// An HTTP date as defined by the IMF-fixdate production in
     /// RFC 9110#section-5.6.7 (for example, Tue, 29 Apr 2014 18:30:38 GMT).
     HTTP_DATE = "http-date"
