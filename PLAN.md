@@ -34,7 +34,8 @@ Smithy IDL text
 - Service-level `indexed` validation and `idx` range/contiguity checks; the
   minimal `idx` trait definition is built in.
 - `smithy-build.json`, projections, transforms, plugin/Maven resolution.
-- JSON AST loading (a debug model JSON view is not a conformance claim; full loader later).
+- JSON AST *output* serialization (`model --json` remains a debug view; JSON
+  AST loading is implemented).
 - Streaming, event streams, XML, CBOR, auth, retries.
 - A generic multi-language codegen framework ported from Java.
 
@@ -415,6 +416,8 @@ Milestones 1–5 are implemented; see
 [`docs/plan/04-http-json-protocol.md`](docs/plan/04-http-json-protocol.md), and
 [`docs/plan/05-smithy-2.1-semantics.md`](docs/plan/05-smithy-2.1-semantics.md),
 plus the protocol guide in [`docs/http-json-protocol.md`](docs/http-json-protocol.md).
-The first post-M4 follow-up is the JSON AST loader described in
-[`docs/plan/04-http-json-protocol.md`](docs/plan/04-http-json-protocol.md#10-deferred-to-the-end-json-ast-loader).
+The JSON AST loader is implemented: `.json` models load through the same
+assembler, and every upstream `valid/**/*.json` fixture is compared with its
+IDL sibling. JSON AST *output* remains a separate, unimplemented question (see
+[`docs/plan/04-http-json-protocol.md`](docs/plan/04-http-json-protocol.md#10-deferred-to-the-end-json-ast-loader)).
 No AWS protocols, traits, or code paths are part of the project.

@@ -1,11 +1,12 @@
 # Fixture classification
 
-This directory contains the Smithy IDL fixture corpus from the upstream Smithy
-Java repository, limited to `.smithy` files:
+This directory contains the Smithy fixture corpus from the upstream Smithy
+Java repository: the `.smithy` fixtures plus the expected JSON AST models.
 
-- `valid/` — 100 files, all of which must parse with the M1 parser.
-- `invalid/` — 207 files. Each file's first line (`// ...`) is the expected
-  parser or assembler error.
+- `valid/` — 100 `.smithy` files, all of which must parse with the M1 parser,
+  and 81 `.json` files loaded by the JSON AST loader.
+- `invalid/` — 207 `.smithy` files. Each file's first line (`// ...`) is the
+  expected parser or assembler error.
 
 The upstream corpus is version-aware. M1 implements the Smithy 2.0 grammar
 plus the 2.1 syntax additions (member indexes, inline collections, and tagged
@@ -22,6 +23,21 @@ the parser harness and asserted by the semantic model tests instead.
 | Invalid fixtures | 207 |
 | Invalid syntax fixtures checked by M1 | 180 |
 | Invalid semantic fixtures covered by M2 | 27 |
+| Valid JSON AST fixtures | 81 |
+| JSON AST fixtures compared with their `.smithy` sibling | 80 |
+
+## Valid JSON AST fixtures
+
+`valid/**/*.json` are copied verbatim from the upstream corpus. Except for
+`__shared.json`, each one has a `.smithy` sibling. `model/jsonast_test.go`
+loads both representations with the same assembler (using `__shared.json` and
+`shared.smithy` respectively) and compares the resulting semantic models. That
+covers 80 pairs. `__shared.json` is also compared directly with the IDL port
+`testdata/shared.smithy` so the two cannot drift apart.
+
+The JSON loader lives in `idl/json_ast.go`; `parse`, `validate`, and `model`
+accept `.json` files by extension. `model --json` is still a debug view, not a
+JSON AST serializer.
 
 ## Valid 2.1 fixtures
 

@@ -301,3 +301,81 @@ func TestGenerateClean(t *testing.T) {
 		t.Errorf("--clean removed generated files: %v", err)
 	}
 }
+
+// TestGenerateJSONASTMatchesIDL proves that the JSON AST loader feeds codegen
+// exactly like the IDL parser: the generated files are byte-identical.
+func TestGenerateJSONASTMatchesIDL(t *testing.T) {
+	root := filepath.Join("..", "..", "testdata", "loader", "valid")
+	shared := filepath.Join("..", "..", "testdata", "shared.smithy")
+	jsonOut := filepath.Join(t.TempDir(), "gen")
+	idlOut := filepath.Join(t.TempDir(), "gen")
+
+	generate := func(out string, files ...string) {
+		t.Helper()
+		args := []string{
+			"generate",
+			"--service", "example.weather#Weather",
+			"--generator", "go",
+			"--module", "example.com/weather",
+			"--out", out,
+		}
+		args = append(args, files...)
+		if _, err := captureStdout(t, func() error { return run(args) }); err != nil {
+			t.Fatalf("generate: %v", err)
+		}
+	}
+	generate(jsonOut,
+		filepath.Join(root, "__shared.json"),
+		filepath.Join(root, "main-test.json"))
+	generate(idlOut,
+		shared,
+		filepath.Join(root, "main-test.smithy"))
+
+	compareDirectories(t, idlOut, jsonOut)
+}
+
+func compareDirectories(t *testing.T, want, got string) {
+	t.Helper()
+	wantFiles := directoryFiles(t, want)
+	gotFiles := directoryFiles(t, got)
+	if len(gotFiles) != len(wantFiles) {
+		t.Fatalf("generated %d files, want %d", len(gotFiles), len(wantFiles))
+	}
+	for name, wantData := range wantFiles {
+		gotData, ok := gotFiles[name]
+		if !ok {
+			t.Errorf("missing generated file %s", name)
+			continue
+		}
+		if string(gotData) != string(wantData) {
+			t.Errorf("generated file %s differs", name)
+		}
+	}
+}
+
+func directoryFiles(t *testing.T, root string) map[string][]byte {
+	t.Helper()
+	files := make(map[string][]byte)
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		files[filepath.ToSlash(rel)] = data
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return files
+}

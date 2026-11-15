@@ -1,0 +1,22 @@
+{
+    "smithy": "2.1",
+    "shapes": {
+        "smithy.example#MyStructure": {
+            "type": "structure",
+            "members": {
+                "widgets": {
+                    "target": "smithy.example#_SyntheticListOf_foo_example_Widget"
+                }
+            }
+        },
+        "smithy.example#_SyntheticListOf_foo_example_Widget": {
+            "type": "list",
+            "member": {
+                "target": "foo.example#Widget"
+            },
+            "traits": {
+                "smithy.api#synthetic": {}
+            }
+        }
+    }
+}

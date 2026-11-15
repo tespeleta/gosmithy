@@ -1,0 +1,37 @@
+{
+    "smithy": "2.1",
+    "shapes": {
+        "smithy.example#MyUnion": {
+            "type": "union",
+            "members": {
+                "names": {
+                    "target": "smithy.example#_SyntheticListOf__String"
+                },
+                "tags": {
+                    "target": "smithy.example#_SyntheticMapOf__String_To___Integer"
+                }
+            }
+        },
+        "smithy.example#_SyntheticListOf__String": {
+            "type": "list",
+            "member": {
+                "target": "smithy.api#String"
+            },
+            "traits": {
+                "smithy.api#synthetic": {}
+            }
+        },
+        "smithy.example#_SyntheticMapOf__String_To___Integer": {
+            "type": "map",
+            "key": {
+                "target": "smithy.api#String"
+            },
+            "value": {
+                "target": "smithy.api#Integer"
+            },
+            "traits": {
+                "smithy.api#synthetic": {}
+            }
+        }
+    }
+}

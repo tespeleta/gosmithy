@@ -241,3 +241,39 @@ structure S {
 		t.Errorf("-protocols=false still assembled the wire protocol definition")
 	}
 }
+
+func TestValidateJSONASTInput(t *testing.T) {
+	shared := filepath.Join("..", "..", "testdata", "loader", "valid", "__shared.json")
+	fixture := filepath.Join("..", "..", "testdata", "loader", "valid", "service-with-rename.json")
+
+	output, err := captureStdout(t, func() error {
+		return run([]string{"validate", shared, fixture})
+	})
+	if err != nil {
+		t.Fatalf("validate JSON AST: %v", err)
+	}
+	if output != "" {
+		t.Errorf("valid JSON AST produced output: %q", output)
+	}
+
+	files, err := parseFiles([]string{fixture})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].Version != idl.V1_0 {
+		t.Fatalf("parsed JSON AST file = %#v", files)
+	}
+}
+
+func TestParseJSONASTInput(t *testing.T) {
+	path := filepath.Join("..", "..", "testdata", "loader", "valid", "main-test.json")
+	output, err := captureStdout(t, func() error {
+		return run([]string{"parse", path})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output, `"kind": "service"`) || !strings.Contains(output, `"id": "example.weather#Weather"`) {
+		t.Errorf("parse output missing service: %.300s", output)
+	}
+}

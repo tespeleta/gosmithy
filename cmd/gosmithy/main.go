@@ -7,6 +7,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/tespeleta/gosmithy/idl"
 	"github.com/tespeleta/gosmithy/protocol/httpjson"
@@ -62,7 +64,7 @@ func printUsage(w *os.File) {
 	fmt.Fprintf(w, `Usage: gosmithy <command> [arguments]
 
 Commands:
-  parse <file>...      Parse Smithy IDL files and print their AST as JSON
+  parse <file>...      Parse Smithy IDL or JSON AST files and print their AST as JSON
   validate <file>...   Assemble and validate a Smithy model
   model <file>...      Assemble a Smithy model and print it
   generate <file>...   Generate code for a service from a Smithy model
@@ -131,10 +133,15 @@ func parseFiles(paths []string) ([]*idl.File, error) {
 		if err != nil {
 			return nil, fmt.Errorf("reading %s: %w", path, err)
 		}
-		parsed, err := idl.ParseWithOptions(path, string(src), idl.Options{
-			Version:        idl.V2_1,
-			DefaultVersion: idl.V2_0,
-		})
+		var parsed *idl.File
+		if strings.EqualFold(filepath.Ext(path), ".json") {
+			parsed, err = idl.ParseJSONAST(path, src)
+		} else {
+			parsed, err = idl.ParseWithOptions(path, string(src), idl.Options{
+				Version:        idl.V2_1,
+				DefaultVersion: idl.V2_0,
+			})
+		}
 		if err != nil {
 			return nil, err
 		}

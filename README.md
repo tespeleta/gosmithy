@@ -32,6 +32,7 @@ Fixture results against the upstream Smithy corpus:
 | Valid fixtures assemble | 100 / 100 |
 | Invalid fixtures matched by parser errors | 180 / 207 |
 | Semantic invalid fixtures matched by assembly/validation | 27 / 27 |
+| Valid JSON AST fixtures matching their IDL sibling | 80 / 80 |
 
 The parser-only skips are documented in
 [`testdata/loader/CLASSIFICATION.md`](testdata/loader/CLASSIFICATION.md).
@@ -47,6 +48,8 @@ At a glance; the [model](#known-m2-limitations) and
       indexes, and tagged literals.
 - [x] Assembly: prelude, namespaces and `use`, `apply`, forward references,
       mixins, inline operation I/O, duplicate merging, and service closures.
+- [x] JSON AST loading: `idl.ParseJSONAST` and `.json` input for `parse`,
+      `validate`, and `model`, using the same assembler and validators.
 - [x] 2.1 semantics: synthetic inline list/map shapes with stable names,
       grouping, nesting, `@synthetic`, and `smithy.protocols#idx`.
 - [x] Structural validation: unresolved targets, invalid members, operation
@@ -60,8 +63,8 @@ At a glance; the [model](#known-m2-limitations) and
 - **AWS**: AWS protocols, auth and signing, endpoints, SigV4, and AWS traits.
 - **Full validation**: the selector engine, the complete validator suite,
   suppressions, severity overrides, and model transforms.
-- **Other input formats**: the JSON AST loader, `smithy-build.json`,
-  projections, and plugin/Maven resolution.
+- **Other input formats**: `smithy-build.json`, projections, and plugin/Maven
+  resolution. (JSON AST *loading* is covered; JSON AST *output* is not.)
 - **Other wire features**: streaming, event streams, XML, CBOR, multipart,
   retries, and compression.
 - **Other targets**: non-Go code generators and the Java codegen framework.
@@ -180,8 +183,10 @@ identifiers in node values) are resolved to absolute shape IDs and marked with
 - Selector-based trait validation, custom validators, suppressions, and
   severity overrides are not implemented. A set of cheap, explicit trait target
   checks is applied instead.
-- There is no JSON AST loader. The Java repository's shared fixture is ported
-  to `testdata/shared.smithy` for tests.
+- `model --json` is a debug serializer, not a Smithy JSON AST; output
+  serialization is not implemented. The Java repository's shared JSON fixture
+  now loads directly, and `testdata/shared.smithy` is kept as the IDL side of
+  the equivalence test.
 - No model transforms or projections.
 
 ## Code generation
@@ -281,8 +286,8 @@ failures, and empty operations.
   retries, streaming, event streams, compression, or multipart support.
 - Prefix-header suffix keys are lowercased because HTTP header names are
   case-insensitive.
-- There is no JSON AST loader; the M4 follow-up is described in
-  [`docs/plan/04-http-json-protocol.md`](docs/plan/04-http-json-protocol.md).
+- JSON AST models can be validated and generated from, but `model --json` is
+  not a JSON AST serializer.
 - `@length` counts Unicode code points for strings and bytes for blobs.
 - `@range` on `bigInteger` and `bigDecimal` is not generated.
 
