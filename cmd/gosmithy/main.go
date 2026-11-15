@@ -67,7 +67,7 @@ Commands:
   parse <file>...      Parse Smithy IDL or JSON AST files and print their AST as JSON
   validate <file>...   Assemble and validate a Smithy model
   model <file>...      Assemble a Smithy model and print it
-  generate <file>...   Generate code for a service from a Smithy model
+  generate <file>...   Generate code, OpenAPI, or docs for a service from a Smithy model
   version              Print the gosmithy version
   help                 Print this help
 
@@ -76,9 +76,9 @@ Examples:
   gosmithy validate testdata/weather.smithy
   gosmithy model --json testdata/weather.smithy
   gosmithy generate --service example.weather#Weather \\
-      --generator go --module example.com/weather --out ./gen testdata/weather.smithy
+      --generator go:model --module example.com/weather --out ./gen testdata/weather.smithy
   gosmithy generate --service example.library#Library \\
-      --generator go --protocol gosmithy.protocols#httpJson \\
+      --generator go:model,go:server,go:client,openapi:descriptor,openapi:index,docs:markdown \\
       --module example.com/library --out ./gen testdata/library.smithy
   gosmithy validate testdata/loader/valid/main-test.smithy
 `)
@@ -115,7 +115,7 @@ func runParse(args []string) error {
 }
 
 // parseFiles parses every path with the CLI's default parser options. The CLI
-// assumes Smithy 2.0 when a file omits $version, matching PLAN.md.
+// assumes Smithy 2.0 when a file omits $version, matching the project's 2.0 default.
 // appendBuiltinProtocols adds the protocol definitions compiled into gosmithy so
 // that gosmithy.protocols#* references resolve without a flag.
 func appendBuiltinProtocols(files []*idl.File) ([]*idl.File, error) {

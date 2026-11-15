@@ -104,6 +104,7 @@ func (r *Runner) Run(ctx context.Context, req *Request, gens []Generator) (*RunR
 	sort.SliceStable(result.Diagnostics, func(i, j int) bool {
 		return diagnosticLess(result.Diagnostics[i], result.Diagnostics[j])
 	})
+	result.Diagnostics = dedupeDiagnostics(result.Diagnostics)
 	result.Files = make([]File, 0, len(paths))
 	for _, p := range paths {
 		result.Files = append(result.Files, merged[p])
@@ -232,6 +233,22 @@ func countDanger(diags []Diagnostic) string {
 		return "1 DANGER diagnostic"
 	}
 	return fmt.Sprintf("%d DANGER diagnostics", n)
+}
+
+func dedupeDiagnostics(diags []Diagnostic) []Diagnostic {
+	if len(diags) < 2 {
+		return diags
+	}
+	out := diags[:1]
+	for _, diag := range diags[1:] {
+		previous := out[len(out)-1]
+		if previous.Severity == diag.Severity && previous.Message == diag.Message &&
+			previous.Path == diag.Path && previous.Line == diag.Line && previous.Column == diag.Column {
+			continue
+		}
+		out = append(out, diag)
+	}
+	return out
 }
 
 func diagnosticLess(a, b Diagnostic) bool {

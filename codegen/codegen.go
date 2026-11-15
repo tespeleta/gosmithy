@@ -10,6 +10,7 @@ package codegen
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"sort"
@@ -61,8 +62,7 @@ type Request struct {
 	Files []string
 }
 
-// Target is a bundle of generators that write into one module. Milestone 3
-// registers a single generator named "go".
+// Target is a bundle of generators that write into one output tree.
 type Target struct {
 	Name       string
 	Generators []string
@@ -116,16 +116,32 @@ func (d Diagnostic) String() string {
 // Factory creates a fresh generator instance.
 type Factory func() Generator
 
-// Registry maps generator names to factories. A registry is safe for
+// Selection is one resolved generator option.
+type Selection struct {
+	// Namespace is the generator package namespace, such as "go".
+	Namespace string
+	// Option is the option within the namespace, such as "model".
+	Option string
+	// Name is the canonical "namespace:option" name.
+	Name string
+	// Generator is the instantiated generator.
+	Generator Generator
+}
+
+// Registry maps generator option names to factories. A registry is safe for
 // concurrent use after registration.
 type Registry struct {
-	mu        sync.RWMutex
-	factories map[string]Factory
+	mu         sync.RWMutex
+	factories  map[string]Factory
+	namespaces map[string]map[string]Factory
 }
 
 // NewRegistry returns an empty registry.
 func NewRegistry() *Registry {
-	return &Registry{factories: make(map[string]Factory)}
+	return &Registry{
+		factories:  make(map[string]Factory),
+		namespaces: make(map[string]map[string]Factory),
+	}
 }
 
 // Register adds a generator factory. It panics when name is empty, f is nil,
@@ -144,6 +160,146 @@ func (r *Registry) Register(name string, f Factory) {
 		panic("codegen: generator " + name + " is already registered")
 	}
 	r.factories[name] = f
+}
+
+// RegisterNamespace registers a generator namespace and its options. Options
+// are addressable as "namespace:option"; selecting the namespace alone selects
+// every option. Registration panics on empty names, nil factories, or
+// duplicates.
+func (r *Registry) RegisterNamespace(namespace string, options map[string]Factory) {
+	if namespace == "" {
+		panic("codegen: empty generator namespace")
+	}
+	if len(options) == 0 {
+		panic("codegen: generator namespace " + namespace + " has no options")
+	}
+	r.mu.RLock()
+	_, exists := r.namespaces[namespace]
+	r.mu.RUnlock()
+	if exists {
+		panic("codegen: generator namespace " + namespace + " is already registered")
+	}
+	names := make([]string, 0, len(options))
+	for name := range options {
+		if name == "" {
+			panic("codegen: empty option in generator namespace " + namespace)
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		r.Register(namespace+":"+name, options[name])
+	}
+	r.mu.Lock()
+	r.namespaces[namespace] = options
+	r.mu.Unlock()
+}
+
+// Namespaces returns the registered namespaces in lexical order.
+func (r *Registry) Namespaces() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	names := make([]string, 0, len(r.namespaces))
+	for name := range r.namespaces {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// Options returns one namespace's options in lexical order.
+func (r *Registry) Options(namespace string) []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	options := r.namespaces[namespace]
+	names := make([]string, 0, len(options))
+	for name := range options {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// Available returns a human-readable namespace/option listing.
+func (r *Registry) Available() string {
+	namespaces := r.Namespaces()
+	parts := make([]string, 0, len(namespaces))
+	for _, namespace := range namespaces {
+		options := r.Options(namespace)
+		parts = append(parts, namespace+"("+strings.Join(options, ", ")+")")
+	}
+	return strings.Join(parts, ", ")
+}
+
+// Resolve expands generator selections into concrete generator instances.
+// An empty selection selects every namespace and every option. A bare
+// namespace selects all of its options; a "namespace:option" selects one.
+func (r *Registry) Resolve(selections []string) ([]Selection, error) {
+	if len(selections) == 0 {
+		selections = r.Namespaces()
+	}
+	order := make([]string, 0)
+	seen := make(map[string]bool)
+	add := func(namespace, option string) error {
+		name := namespace + ":" + option
+		if _, exists := r.factories[name]; !exists {
+			return fmt.Errorf("unknown generator option %q", name)
+		}
+		if seen[name] {
+			return nil
+		}
+		seen[name] = true
+		order = append(order, name)
+		return nil
+	}
+	for _, raw := range selections {
+		selection := strings.TrimSpace(raw)
+		if selection == "" {
+			return nil, errors.New("codegen: empty generator selection")
+		}
+		if strings.Contains(selection, ":") {
+			namespace, option, ok := strings.Cut(selection, ":")
+			if !ok || namespace == "" || option == "" || strings.Contains(option, ":") {
+				return nil, fmt.Errorf("codegen: invalid generator selection %q; want namespace:option", raw)
+			}
+			if _, ok := r.namespaces[namespace]; !ok {
+				return nil, fmt.Errorf("codegen: unknown generator namespace %q (available: %s)", namespace, r.Available())
+			}
+			if err := add(namespace, option); err != nil {
+				return nil, fmt.Errorf("codegen: %w (available: %s)", err, r.Available())
+			}
+			continue
+		}
+		options, ok := r.namespaces[selection]
+		if !ok {
+			return nil, fmt.Errorf("codegen: unknown generator %q (available: %s)", selection, r.Available())
+		}
+		names := make([]string, 0, len(options))
+		for option := range options {
+			names = append(names, option)
+		}
+		sort.Strings(names)
+		for _, option := range names {
+			if err := add(selection, option); err != nil {
+				return nil, fmt.Errorf("codegen: %w", err)
+			}
+		}
+	}
+	resolved := make([]Selection, 0, len(order))
+	for _, name := range order {
+		namespace, option, _ := strings.Cut(name, ":")
+		gen, ok := r.Get(name)
+		if !ok {
+			return nil, fmt.Errorf("codegen: unknown generator %q", name)
+		}
+		resolved = append(resolved, Selection{
+			Namespace: namespace,
+			Option:    option,
+			Name:      name,
+			Generator: gen,
+		})
+	}
+	return resolved, nil
 }
 
 // Get instantiates the named generator.

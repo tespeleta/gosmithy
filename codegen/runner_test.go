@@ -322,3 +322,17 @@ func TestCheckCleanableRefusesOwnedParents(t *testing.T) {
 		t.Errorf("checkCleanable(root) = %v, want refusal", err)
 	}
 }
+
+func TestRunnerDedupesIdenticalDiagnostics(t *testing.T) {
+	diag := Diagnostic{Severity: validation.Warning, Message: "same", Path: "a.smithy", Line: 1, Column: 2}
+	result, err := (&Runner{OutDir: t.TempDir()}).Run(context.Background(), &Request{}, []Generator{
+		fakeGenerator(nil, diag),
+		fakeGenerator(nil, diag),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := len(result.Diagnostics), 1; got != want {
+		t.Errorf("diagnostics = %d, want %d: %+v", got, want, result.Diagnostics)
+	}
+}

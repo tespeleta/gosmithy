@@ -1,146 +1,179 @@
 # gosmithy
 
-A Go implementation of the Smithy IDL and a pluggable code generator.
+`gosmithy` is a small Go implementation of the Smithy 2.0 interface definition
+language, its semantic model, and a set of generators for Go code, OpenAPI, and
+documentation.
 
-- Core is generic Smithy. No AWS protocols or traits in the MVP.
-- Parse Smithy IDL 2.0 — plus the 2.1 syntax additions — into a source-located AST.
-- Assemble a semantic model: prelude, namespaces, `use`, forward references,
-  `apply`, mixins, inline operation I/O, duplicate merging, and service closures.
-- Validate the structural properties codegen depends on.
-- Generate Go types, validators, and HTTP+JSON clients and servers.
-- Generators implement a small Buf-inspired request/response interface.
-- Generated modules are self-contained and use only the standard library.
+It is for projects that want to read Smithy models and turn them into plain Go
+code without pulling in a large toolchain. Feed it a `.smithy` file or a JSON
+AST model, and it will resolve the model, report structural problems, and emit
+a self-contained Go module containing data types, validators, and an optional
+HTTP+JSON client and server. The same model can produce an OpenAPI document and
+a generated documentation bundle.
 
-## Status
+This is **not** an attempt to reimplement Smithy or its surrounding ecosystem.
+The scope is intentionally narrow. The project focuses on the low-level, stable
+parts of the specification: the IDL, the semantic model, and the traits that
+directly change generated output. No Java toolchain or JVM is involved.
 
-**Milestones 1–4 and the Smithy 2.1 semantics are implemented:** the parser
-covers the full IDL 2.0 grammar plus the 2.1 syntax additions; the semantic
-model assembles the prelude, fixtures, mixins, inline I/O, and service
-closures, and implements the 2.1 semantics (synthetic inline collections and
-member indexes); structural validation reports unresolved references, invalid
-members, invalid operation I/O and errors, mixin problems, enum problems, and
-syntactic shape IDs; the `go` code generator emits a self-contained Go module
-with data types and validators; and `gosmithy.protocols#httpJson` adds an HTTP
-binding index, generated clients and servers, JSON value codecs, and protocol
-errors. See [`docs/http-json-protocol.md`](docs/http-json-protocol.md).
+The full map of what is and is not covered is in [`COVERAGE.md`](COVERAGE.md),
+organised as a checkbox tree that follows the
+[Smithy 2.0 specification](https://smithy.io/2.0/spec/index.html).
 
-Fixture results against the upstream Smithy corpus:
+## Objectives
 
-| Category | Result |
-|---|---:|
-| Valid fixtures parse | 100 / 100 |
-| Valid fixtures assemble | 100 / 100 |
-| Invalid fixtures matched by parser errors | 180 / 207 |
-| Semantic invalid fixtures matched by assembly/validation | 27 / 27 |
-| Valid JSON AST fixtures matching their IDL sibling | 80 / 80 |
+gosmithy aims to:
 
-The parser-only skips are documented in
-[`testdata/loader/CLASSIFICATION.md`](testdata/loader/CLASSIFICATION.md).
+- **Read Smithy IDL 2.0** and the 2.1 language additions: inline collections,
+  member indexes, and tagged literals.
+- **Build a semantic model**: namespaces and `use`, the prelude, `apply`,
+  forward references, mixins, inline operation I/O, duplicate merging, service
+  closures, and 2.1 synthetic shapes.
+- **Validate the structural rules code generation depends on**: unresolved
+  targets, invalid members, operation I/O and errors, mixin problems, enum
+  problems, and syntactic shape IDs.
+- **Generate Go code** for structures, collections, enums, intEnums, unions,
+  and errors, with `Validate()` methods for the core constraint traits.
+- **Generate both sides of a simple HTTP+JSON service**: a typed client, a
+  typed server, routing, error mapping, and JSON codecs.
+- **Generate an OpenAPI 3.0.3 document** from the same service and HTTP
+  bindings, for use with the wider OpenAPI tool ecosystem.
+- **Generate API documentation**: a static Redoc API reference plus a
+  Markdown guide derived from the model's documentation traits and examples.
+- **Keep generated Go modules self-contained**: only the Go standard library,
+  no runtime dependency on gosmithy.
+- **Stay usable as a library**: `idl`, `model`, `validation`, and `codegen` are
+  ordinary public Go packages.
 
-## Smithy feature coverage
+What it deliberately does not try to do is equally important:
 
-At a glance; the [model](#known-m2-limitations) and
-[codegen](#known-limitations) limitation lists have the details.
+- It is not a drop-in replacement for the complete Smithy toolchain.
+- It does not implement AWS protocols, authentication, signing, endpoints, or
+  AWS-specific traits.
+- It does not implement the full Smithy validator framework, selector engine,
+  suppressions, severity overrides, model transformations, or projections.
+- It does not read `smithy-build.json` or resolve Maven/Gradle/plugin setups.
+- It does not generate code for languages other than Go.
+- It does not implement streaming, event streams, XML, CBOR, multipart,
+  compression, retries, or content negotiation.
 
-### Covered
-
-- [x] IDL 2.0 grammar and the 2.1 additions: inline collections, member
-      indexes, and tagged literals.
-- [x] Assembly: prelude, namespaces and `use`, `apply`, forward references,
-      mixins, inline operation I/O, duplicate merging, and service closures.
-- [x] JSON AST loading: `idl.ParseJSONAST` and `.json` input for `parse`,
-      `validate`, and `model`, using the same assembler and validators.
-- [x] 2.1 semantics: synthetic inline list/map shapes with stable names,
-      grouping, nesting, `@synthetic`, and `smithy.protocols#idx`.
-- [x] Structural validation: unresolved targets, invalid members, operation
-      I/O and errors, mixins, enums, and syntactic shape IDs.
-- [x] Go code generation: types, validators, enums, unions, errors, and
-      `httpJson` clients and servers.
-- [x] Self-contained generated modules that use only the standard library.
-
-### Not covered
-
-- **AWS**: AWS protocols, auth and signing, endpoints, SigV4, and AWS traits.
-- **Full validation**: the selector engine, the complete validator suite,
-  suppressions, severity overrides, and model transforms.
-- **Other input formats**: `smithy-build.json`, projections, and plugin/Maven
-  resolution. (JSON AST *loading* is covered; JSON AST *output* is not.)
-- **Other wire features**: streaming, event streams, XML, CBOR, multipart,
-  retries, and compression.
-- **Other targets**: non-Go code generators and the Java codegen framework.
-- **Protocol-traits breadth**: service-level `indexed` validation and `idx`
-  range/contiguity; only the minimal `idx` trait definition is built in.
+Those are real Smithy features. They are simply outside this project's scope.
 
 ## Quick start
 
 ```sh
+git clone https://github.com/tespeleta/gosmithy
+cd gosmithy
+
 make build
 ./bin/gosmithy version
-./bin/gosmithy parse testdata/loader/valid/main-test.smithy
+
+# Inspect a model
+./bin/gosmithy parse testdata/weather.smithy
 ./bin/gosmithy validate testdata/weather.smithy
-./bin/gosmithy model --json testdata/weather.smithy | head
-./bin/gosmithy generate --service example.weather#Weather \
-    --generator go --module example.com/weather --out ./gen testdata/weather.smithy
+./bin/gosmithy model testdata/weather.smithy
+
+# Generate Go data types and validators
+./bin/gosmithy generate \
+    --service example.weather#Weather \
+    --generator go:model \
+    --module example.com/weather \
+    --out ./gen \
+    testdata/weather.smithy
+
 (cd gen && go build ./...)
 
-# HTTP+JSON client and server
-./bin/gosmithy generate --service example.library#Library \
-    --generator go --protocol gosmithy.protocols#httpJson \
-    --module example.com/library --out ./gen-http testdata/library.smithy
+# Generate an HTTP+JSON client and server
+./bin/gosmithy generate \
+    --service example.library#Library \
+    --generator go:model,go:server,go:client \
+    --module example.com/library \
+    --out ./gen-http \
+    testdata/library.smithy
+
 (cd gen-http && go build ./...)
+
+# Generate Go, OpenAPI, and docs in one run
+./bin/gosmithy generate \
+    --service example.library#Library \
+    --generator go:model,go:server,go:client,openapi:descriptor,openapi:index,docs:markdown \
+    --module example.com/library \
+    --out ./gen-all \
+    testdata/library.smithy
 ```
 
-`make` builds `bin/gosmithy` with `-trimpath` and injects the version from
-`git describe` (falls back to `0.1.0-dev`). Override it with
-`make build VERSION=1.2.3`, or use `go build ./cmd/gosmithy` directly.
+`make build` writes `bin/gosmithy` with `-trimpath` and embeds a version from
+`git describe` (falling back to `0.1.0-dev`). You can also use
+`go build ./cmd/gosmithy`, or `go run ./cmd/gosmithy ...` for a one-off run.
 
-Generated modules contain no tests, so the quick start checks them with
-`go build ./...`; the repository's own round-trip and compile-matrix suites live
-under `codegen/golang`.
+The generated modules contain no tests of their own. The repository's
+round-trip, golden, and compile tests live under
+[`codegen/golang`](codegen/golang), and the quick start checks generated code
+with `go build ./...`.
 
-`parse` prints a debug JSON view of the AST, including line/column source
-locations. `validate` exits 1 when any DANGER event is reported, and prints
-events in the form `file:line:column: SEVERITY: message`. `model --json` prints
-a deterministic debug view of the assembled semantic model (not a Smithy JSON
-AST conformance surface); pass `-prelude=false` to omit prelude shapes and
-`-protocols=false` to omit the built-in wire protocol definitions. The
-`smithy.protocols#idx` trait used by 2.1 member indexes is always built in.
-Normal output, including validation events and generation diagnostics, goes to
-stdout; fatal errors and usage go to stderr.
+## How it fits together
 
-`validate`, `model`, and `generate` assemble the embedded
-`gosmithy.protocols#httpJson` definition by default, so protocol models need no
-extra flag; `model -protocols=false` omits it, and `--protocol` in `generate`
-only selects the wire protocol for codegen.
-
-```console
-$ ./bin/gosmithy validate testdata/broken.smithy
-testdata/broken.smithy:6:5: DANGER: Target `example.weather#MissingShape` is not found in the model
-$ echo $?
-1
+```text
+Smithy IDL (.smithy) ─┐
+                      ├─→ idl ─→ model ─→ validation
+Smithy JSON AST (.json)┘          │
+                                  └─→ codegen ─→ Go module
+                                        │      └→ OpenAPI 3.0.3
+                                        │      └→ docs (Redoc HTML + Markdown)
+                                        └─ service closure + HTTP binding index
 ```
 
-Example:
+- [`idl`](idl) turns text or JSON into a source-located AST.
+- [`model`](model) resolves names, assembles the prelude, flattens mixins,
+  applies traits, and freezes the semantic model.
+- [`validation`](validation) adds structural checks and returns source-located
+  events.
+- [`model/httpbinding`](model/httpbinding) builds the HTTP binding index for a
+  service.
+- [`codegen`](codegen) defines the generator contract and writes merged output.
+- [`codegen/golang`](codegen/golang) is the Go target.
 
-```console
-$ make build >/dev/null
-$ ./bin/gosmithy parse testdata/loader/valid/main-test.smithy
-{
-  "filename": "testdata/loader/valid/main-test.smithy",
-  "version": "2.0",
-  "namespace": "example.weather",
-  "shapes": [
-    {
-      "kind": "service",
-      "name": "Weather",
-      "id": "example.weather#Weather",
-      ...
-    }
-  ]
+The dependency direction is `idl → model → validation → codegen → cmd`.
+
+## Parsing
+
+The parser produces a close-to-syntax AST with line/column locations on shapes,
+members, traits, and nodes.
+
+```go
+import "github.com/tespeleta/gosmithy/idl"
+
+file, err := idl.Parse("weather.smithy", src)
+if err != nil {
+    // Errors are *idl.ParseError and carry line/column locations.
+    return err
+}
+
+for _, stmt := range file.Shapes {
+    shape := stmt.(*idl.ShapeStmt)
+    fmt.Println(shape.Kind, shape.Name)
 }
 ```
 
-## Model API
+Use `ParseWithOptions` to pin the supported and default IDL versions:
+
+```go
+file, err := idl.ParseWithOptions("weather.smithy", src, idl.Options{
+    Version:        idl.V2_0, // newest version the caller supports
+    DefaultVersion: idl.V2_0, // used when the file has no $version
+})
+```
+
+`Version` gates 2.1 syntax. `DefaultVersion` is assumed when a file has no
+`$version` control statement. The CLI supports 2.1 and assumes 2.0 when a file
+omits `$version`.
+
+JSON AST input is supported through `idl.ParseJSONAST`. The CLI selects it by
+file extension, so `parse`, `validate`, `model`, and `generate` all accept
+`.json` models. Loading JSON AST is supported; writing JSON AST is not.
+`gosmithy parse` prints a debug JSON view of the AST, not a Smithy JSON AST.
+
+## The model API
 
 ```go
 import (
@@ -153,47 +186,37 @@ file, err := idl.Parse("weather.smithy", src)
 if err != nil {
     return err
 }
+
 m, err := model.Assemble([]*idl.File{file}, model.Options{})
 if err != nil {
     return err // internal prelude failure, not a modeler error
 }
+
 for _, event := range validation.Validate(m) {
     fmt.Println(event) // sorted by source location
 }
+
 if closure, ok := m.ServiceClosure(model.MustShapeID("example.weather#Weather")); ok {
     _ = closure
 }
 ```
 
-Assembly never fails on invalid user models: problems are recorded as
-diagnostics and returned by `validation.Validate`. Member shapes are
-first-class entries in the model (`Foo$bar`), so member traits and traversal
-are uniform with other shapes. The model is frozen for codegen: shapes,
-members, traits, and metadata are iterated deterministically.
+Assembly never fails on an invalid user model. Problems are recorded as
+diagnostics and returned by `validation.Validate`. Member shapes are first-class
+entries in the model (`Foo$bar`), so member traits and traversal are uniform with
+other shapes. Shapes, members, traits, and metadata are iterated
+deterministically, and the model is frozen for code generation.
 
-`model.Node` is a resolved node value. Syntactic shape IDs (unquoted
-identifiers in node values) are resolved to absolute shape IDs and marked with
-`Node.SyntacticShapeID`; `validation` reports unresolvable ones with the
+`model.Node` is a resolved node value. Syntactic shape IDs (unquoted identifiers
+in node values) are resolved to absolute shape IDs and marked with
+`Node.SyntacticShapeID`; validation reports unresolvable ones with the
 `SyntacticShapeIdTarget` event.
-
-### Known M2 limitations
-
-- Service-level `indexed` validation and `idx` range/contiguity checks are not
-  implemented; only the minimal `idx` trait definition is built in.
-- Selector-based trait validation, custom validators, suppressions, and
-  severity overrides are not implemented. A set of cheap, explicit trait target
-  checks is applied instead.
-- `model --json` is a debug serializer, not a Smithy JSON AST; output
-  serialization is not implemented. The Java repository's shared JSON fixture
-  now loads directly, and `testdata/shared.smithy` is kept as the IDL side of
-  the equivalence test.
-- No model transforms or projections.
 
 ## Code generation
 
-Milestones 3 and 4 add the plugin contract, the Go target, and the HTTP+JSON
-protocol. A generator receives one request and returns files; it never writes
-to disk:
+A generator receives one request and returns files. The Go target and the
+OpenAPI/docs generators use the same contract. Generators never write to disk,
+which makes them deterministic and easy to test:
 
 ```go
 type Generator interface {
@@ -211,62 +234,158 @@ type Request struct {
 }
 ```
 
-`codegen.Runner` calls the selected generators with the same request, merges
-their files, rejects paths outside the output directory, detects duplicate
-paths with differing content, and writes only after every generator succeeds.
-DANGER diagnostics abort the run.
+`codegen.Runner` calls every selected generator with the same request, merges
+their files, rejects paths outside the output directory, detects duplicate paths
+with differing content, and writes only after every generator succeeds. DANGER
+diagnostics abort the run.
 
 The output directory is owned by the tool. Pass `--clean` to remove it before
 writing, so outputs from an older model do not linger. Without `--clean` the
-runner only writes and overwrites files, and files it no longer generates stay
+runner only writes and overwrites files; files it no longer generates stay
 behind.
 
-```console
-$ ./bin/gosmithy generate --service example.weather#Weather \
-    --generator go --module example.com/weather --out ./gen \
-    testdata/weather.smithy
-7 file(s) written, 0 skipped, 0 diagnostic(s)
+A model-only Go generation produces:
 
-$ find gen -type f | sort
-gen/go.mod
-gen/internal/smithy/json.go
-gen/internal/smithy/validate.go
-gen/types/enums.go
-gen/types/types.go
-gen/types/unions.go
-gen/types/validate.go
+```text
+gen/
+  go.mod
+  internal/smithy/
+    json.go
+    validate.go
+  types/
+    types.go
+    enums.go
+    unions.go
+    validate.go
 ```
 
-The generated module uses only the standard library. The `go` generator maps
-Smithy simple shapes to Go scalars, structures to structs (optional members are
-pointers or nilable slices/maps), lists/sets and maps to named collection types,
-enums/intEnums to named string/int32 types with constants and `Values()`,
-unions to an interface plus wrapper structs, and errors to structs implementing
-`error`, `ErrorCode()`, and `ErrorFault()`. Every structure, error, and named
-collection has a `Validate()` method covering `@required`, `@length`, `@range`,
-`@pattern`, `@uniqueItems`, and nested shapes. Member constraints override the
-same constraint on the target shape; nested failure paths look like
+The generated module uses only the standard library. The Go target maps Smithy
+shapes as follows:
+
+| Smithy | Go |
+|---|---|
+| `string` | `string` |
+| `blob` | `[]byte` |
+| `boolean` | `bool` |
+| `byte` / `short` / `integer` / `long` | `int8` / `int16` / `int32` / `int64` |
+| `float` / `double` | `float32` / `float64` |
+| `bigInteger` / `bigDecimal` | `*big.Int` / `*big.Float` |
+| `timestamp` | `time.Time` |
+| `document` | `any` |
+| `list` / `set` | `[]T` |
+| `map` | `map[string]V` |
+| `structure` | `struct` |
+| `union` | interface plus per-member wrapper structs |
+| `enum` | named `string` plus constants |
+| `intEnum` | named `int32` plus constants |
+| `Unit` | `struct{}` |
+| error structure | struct implementing `error` + `ErrorCode()` |
+
+Optional members are pointers or nilable slices/maps. Requiredness and
+constraints are enforced by `Validate()`. Structures, errors, and named
+collections all get a `Validate()` method covering `@required`, `@length`,
+`@range`, `@pattern`, `@uniqueItems`, and nested shapes. Member constraints
+override the same constraint on the target shape. Failure paths look like
 `nested.field`, `items[0]`, or `index[key]`.
 
-`--list-generators` lists the registry, and repeatable `--opt key=value` flags
-pass generator-specific options. `testdata/validators.smithy` exercises every
-supported type and constraint; `testdata/library.smithy` is a realistic example
-with enums, an intEnum, a union, errors, lists, maps, and HTTP bindings; and
-`testdata/weather.smithy` is the smallest demo model.
+`--list-generators` prints the namespaces and options:
 
-### HTTP+JSON clients and servers
+```text
+docs: markdown
+go: client, model, server
+openapi: descriptor, index
+```
 
-Selecting `--protocol gosmithy.protocols#httpJson` adds `service.go`,
-`client.go`, `server.go`, `protocol.go`, and the HTTP runtime. Operations use
-`@http` plus the standard `@httpLabel`, `@httpQuery`, `@httpQueryParams`,
-`@httpHeader`, `@httpPrefixHeaders`, `@httpPayload`, `@httpResponseCode`, and
-`@httpError` traits. Unbound members are JSON-body fields; `@jsonName`,
-`@mediaType`, and all four timestamp formats are honored. The generated server
-validates input and maps validation failures to 400 `ValidationException`;
-unknown routes, wrong methods, malformed bodies, body limits, modeled errors,
-and unhandled errors all use the documented JSON error envelope. See
-[`docs/http-json-protocol.md`](docs/http-json-protocol.md) for the protocol
-guide and generated API.
+Repeatable `--opt key=value` flags pass generator-specific options.
+
+## HTTP+JSON clients and servers
+
+The Go namespace has three options; the bare `go` namespace selects all three:
+
+| Generator | Emits |
+|---|---|
+| `go:model` | The base module: `go.mod`, types, validators, and codecs. |
+| `go:server` | The base module plus the service interface, server, protocol helpers, and HTTP runtime. |
+| `go:client` | The base module plus the client, protocol helpers, and HTTP runtime. |
+| `go` | All Go options: model, server, and client. |
+
+Select `go:server,go:client` (or simply `go`) for a full client and server:
+
+```text
+gen-http/
+  go.mod
+  service.go
+  client.go
+  server.go
+  protocol.go
+  types/
+  internal/smithy/
+```
+
+`gosmithy.protocols#httpJson` is the project's own generic protocol. It is not
+an AWS protocol and does not implement AWS behavior.
+
+Operations use `@http` plus the standard HTTP traits:
+
+| Trait | Behavior |
+|---|---|
+| `@http(method, uri, code)` | Required on every operation. `code` defaults to 200. |
+| `@httpLabel` | One required input member per `{label}` URI segment. Percent-encoded on the client and decoded on the server. |
+| `@httpQuery` | Query parameter. Lists become repeated keys; scalars use their string form. |
+| `@httpQueryParams` | Map of unbound query parameters. Keys bound with `@httpQuery` are excluded. |
+| `@httpHeader` | Request or response header. Lists are comma-separated. |
+| `@httpPrefixHeaders` | Map of prefixed request or response headers. |
+| `@httpPayload` | Raw request or response body. Blob is raw bytes; string is text; other shapes are JSON. |
+| `@httpResponseCode` | Output member that overrides the response status. |
+| `@httpError` | Status code for a modeled error. Defaults to 400 for client errors and 500 for server errors. |
+
+Unbound members are serialized into the JSON body. Bound fields are removed
+before marshaling and are overwritten from the HTTP message after unmarshaling.
+A payload may not be combined with unbound body members. Unknown JSON fields are
+ignored when decoding structures, for forward compatibility.
+
+The generated API is ordinary Go:
+
+```go
+type Service interface {
+    GetBook(ctx context.Context, input *types.GetBookInput) (*types.GetBookOutput, error)
+}
+
+func NewServer(service Service, opts ...ServerOption) *Server
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request)
+
+func NewClient(endpoint string, opts ...ClientOption) *Client
+func (c *Client) GetBook(ctx context.Context, input *types.GetBookInput, optFns ...func(*Options)) (*types.GetBookOutput, error)
+```
+
+Client options are `WithHTTPClient`, `WithBasePath`, and `WithHeader`. Per-call
+`optFns` receive a copied `Options` value, so headers and base paths do not leak
+between calls. Server options are `WithMaxBodyBytes` (default 10 MiB),
+`WithErrorLogger`, and `WithServerBasePath`. The server is a plain
+`http.Handler`, so ordinary middleware works.
+
+Modeled errors are returned as their generated Go types. Other error responses
+become `*smithy.ProtocolError` with `Code`, `Message`, `StatusCode`, and the raw
+body.
+
+Errors use a small JSON envelope:
+
+```json
+{
+  "code": "NotFound",
+  "message": "resource not found",
+  "resource": "book"
+}
+```
+
+| Situation | Status | Code |
+|---|---:|---|
+| Unknown route | 404 | `NotFound` |
+| Wrong method | 405 plus `Allow` | `MethodNotAllowed` |
+| Malformed request | 400 | `BadRequest` |
+| Input validation failure | 400 | `ValidationException` (with `errors`) |
+| Body limit exceeded | 413 | `PayloadTooLarge` |
+| Unhandled service error or panic | 500 | `InternalFailure` |
 
 `testdata/http.smithy` exercises every binding and error path. The Go generator
 tests generate it into a temporary module and run an `httptest` round trip for
@@ -274,68 +393,153 @@ labels, query parameters, headers, prefix headers, JSON bodies, blob payloads,
 unions, big numbers, timestamps, modeled errors, unknown errors, validation
 failures, and empty operations.
 
-### Known limitations
+## OpenAPI and documentation
 
-- `@default` and `@clientOptional` are parsed but not applied to types or
-  values yet.
-- Union values are not validated; map keys are not validated (map values are).
-- Validators do not detect cycles: callers must not build cyclic values.
-- `@pattern` uses Go's RE2 syntax. Patterns that RE2 cannot compile fail
-  generation with a clear error.
-- The HTTP+JSON protocol has no AWS compatibility, signing, authentication,
-  retries, streaming, event streams, compression, or multipart support.
-- Prefix-header suffix keys are lowercased because HTTP header names are
-  case-insensitive.
-- JSON AST models can be validated and generated from, but `model --json` is
-  not a JSON AST serializer.
-- `@length` counts Unicode code points for strings and bytes for blobs.
-- `@range` on `bigInteger` and `bigDecimal` is not generated.
+Two namespaces consume the same assembled model and HTTP binding index:
 
-## Parser API
+- **`openapi:descriptor`** emits the root `openapi.json`, an OpenAPI 3.0.3
+  document with paths, parameters, request/response bodies, modeled errors,
+  component schemas, constraints, and documentation traits.
+- **`openapi:index`** emits `docs/index.html` (Redoc) and a self-contained
+  `docs/openapi.json` for the viewer.
+- **`docs:markdown`** emits `docs/README.md`, the generated overview,
+  operations, schemas, and examples.
 
-```go
-import "github.com/tespeleta/gosmithy/idl"
+The bare namespaces `openapi` and `docs` select all of their options.
 
-file, err := idl.Parse("weather.smithy", src)
-if err != nil {
-    // Errors are *idl.ParseError and carry line/column locations.
-    return err
-}
+Generate one option, a namespace, or several namespaces:
 
-for _, stmt := range file.Shapes {
-    shape := stmt.(*idl.ShapeStmt)
-    fmt.Println(shape.Kind, shape.Name)
-}
+```sh
+# Descriptor only. No Go module is generated, so --module is not required.
+./bin/gosmithy generate \
+    --service example.library#Library \
+    --generator openapi:descriptor \
+    --out ./api \
+    testdata/library.smithy
+
+# The full documentation bundle: Redoc HTML, docs-local descriptor, and Markdown.
+./bin/gosmithy generate \
+    --service example.library#Library \
+    --generator openapi,docs \
+    --out ./site \
+    testdata/library.smithy
+
+# Go, OpenAPI, and docs in one run.
+./bin/gosmithy generate \
+    --service example.library#Library \
+    --generator go:model,go:server,go:client,openapi:descriptor,openapi:index,docs:markdown \
+    --module example.com/library \
+    --out ./gen \
+    testdata/library.smithy
 ```
 
-Use `idl.ParseWithOptions` to pin the supported/newest IDL version:
+`--generator` is repeatable, and each value may also be a comma-separated list.
+The runner merges the outputs and reports the total number of files written.
+The wire protocol is always `gosmithy.protocols#httpJson`, the only built-in
+protocol; there is no protocol flag.
 
-```go
-file, err := idl.ParseWithOptions("weather.smithy", src, idl.Options{
-    Version:        idl.V2_0, // newest version the caller supports
-    DefaultVersion: idl.V2_0, // used when the file has no $version
-})
+The generators cover the documentation traits that affect API documentation:
+
+| Trait | OpenAPI | Generated Markdown |
+|---|---|---|
+| `@documentation`, `///` | `description` | prose |
+| `@deprecated` | `deprecated` | badge |
+| `@title` | `info.title`, operation summary, schema title | headings |
+| `@tags` | tags and operation grouping | tags |
+| `@externalDocumentation` | `externalDocs` (service/operations), `x-smithy-external-docs` (schemas) | external links |
+| `@examples` | parameter, request, and response examples | example blocks |
+| `@sensitive` | `format: password` | password type/badge |
+| `@since` | `x-smithy-since` | `Since …` badge |
+| `@recommended` | `x-smithy-recommended` | `Recommended` badge |
+| `@unstable` | `x-smithy-unstable` + feature id | `Unstable (feature …)` badge |
+| `@unstableFeatures` | `x-smithy-unstable-features` | service-level note |
+| `@internal` | `x-smithy-internal` | `Internal` badge |
+| `@synthetic` | `x-smithy-synthetic` | “Generated by the assembler” badge |
+
+Enum value documentation, deprecation, and `@since` values are carried in
+`x-enum-descriptions`, `x-enum-deprecated`, and `x-enum-since` extensions.
+
+`@internal` follows upstream Smithy behavior: internal operations and shapes
+are included and marked, not filtered. Filtering can be added as an opt-in
+later.
+
+The OpenAPI generator warns and omits bindings that OpenAPI cannot represent,
+notably `@httpPrefixHeaders` and dynamic `@httpResponseCode`. The static
+`@http(code)` is used for the success response. The generated `index.html`
+loads Redoc from a CDN and reads `openapi.json` at runtime, so serve the docs
+over HTTP rather than opening the file directly:
+
+```sh
+python3 -m http.server --directory ./gen/docs
 ```
 
-`Version` gates 2.1 syntax. `DefaultVersion` controls what a file without a
-`$version` control statement is assumed to be. The CLI supports 2.1 and, per
-`PLAN.md`, assumes 2.0 when a file omits `$version`.
+All other generated docs are plain Markdown and JSON. `testdata/docs.smithy`
+exercises the documentation traits, examples, synthetic collections, and
+generated docs end to end.
+
+## CLI
+
+```text
+gosmithy <command> [arguments]
+
+Commands:
+  parse <file>...      Parse Smithy IDL or JSON AST and print the AST as JSON
+  validate <file>...   Assemble and validate a Smithy model
+  model <file>...      Assemble a model and print a summary or debug JSON
+  generate <file>...   Generate code, OpenAPI, or docs for a service
+  version              Print the version
+  help                 Print help
+```
+
+Useful flags:
+
+| Command | Flags |
+|---|---|
+| `validate` | `-min-severity note\|warning\|danger`, `-json` |
+| `model` | `-json`, `-prelude=false`, `-protocols=false` |
+| `generate` | `--service`, `--generator` (namespace or `namespace:option`; repeatable/comma-separated; default all), `--module` (required for Go), `--out`, `--clean`, `--list-generators`, `--opt key=value` |
+
+`--generator go` selects all Go options; `--generator go:model` selects only
+the base module. Omitting `--generator` selects every namespace and option.
+There is no protocol flag.
+
+`validate` exits 1 when any DANGER event is reported. Events are printed as
+`file:line:column: SEVERITY: message`. `validate -json` emits the same events as
+structured JSON. Normal output goes to stdout; fatal errors and usage go to
+stderr.
+
+`model --json` prints a deterministic debug view of the assembled semantic
+model. It is not a Smithy JSON AST. Pass `-prelude=false` to omit prelude shapes
+and `-protocols=false` to omit the built-in wire protocol definitions. The
+`smithy.protocols#idx` trait used by 2.1 member indexes is always built in.
+
+`validate`, `model`, and `generate` assemble the embedded
+`gosmithy.protocols#httpJson` definition by default, so protocol models need no
+extra flag. `model -protocols=false` omits it. `generate` always targets
+`gosmithy.protocols#httpJson`; there is no protocol-selection flag.
 
 ## Packages
 
 ```text
-cmd/gosmithy/   CLI: parse, validate, model, generate, version, help
-codegen/        generator contract, registry, runner, conflict detection
-codegen/golang/ Go target: naming, type mapping, types, validators, tests
+cmd/gosmithy/    CLI: parse, validate, model, generate, version, help
+codegen/         generator contract, registry, runner, conflict detection
+codegen/golang/  Go target: naming, type mapping, types, validators, HTTP
+codegen/openapi/ OpenAPI 3.0.3 generator
+codegen/docs/    Markdown documentation generator
 internal/runtime/ source for the generated internal/smithy package
-idl/            tokenizer, AST, parser, fixture and fuzz tests
-model/          semantic model, prelude, assembly, mixins, service closure
-validation/     structural validators and events
-testdata/       fixture corpus, weather and validators models, golden codegen output
-docs/plan/      one markdown per milestone
+idl/             tokenizer, AST, parser, JSON AST loader, fixture tests
+model/           semantic model, prelude, assembly, mixins, service closure
+model/httpbinding/ HTTP binding index
+protocol/httpjson/ embedded gosmithy.protocols#httpJson definition
+validation/      structural validators and events
+testdata/        fixture corpus, examples, and golden codegen output
 ```
 
-## Make targets
+## Development
+
+```sh
+make check   # gofmt check + go vet + go test
+```
 
 | Target | Action |
 |---|---|
@@ -351,38 +555,27 @@ docs/plan/      one markdown per milestone
 | `make install` | Install into `GOBIN`/`GOPATH/bin` |
 | `make clean` | Remove `bin/` |
 
-## Tests
+The parser and model suites run the upstream Smithy fixture corpus. Every valid
+fixture must parse and assemble; syntax-invalid fixtures must produce their
+expected parser error; semantic-invalid fixtures are checked by event ID,
+message, and source location. `testdata/loader/CLASSIFICATION.md` explains the
+split between syntax and semantic failures.
 
-```sh
-make check   # gofmt check + go vet + go test
-```
+Mixin flattening is compared against the upstream `.flattened.smithy` fixtures.
+The JSON AST loader is compared with IDL siblings for every upstream JSON
+fixture that has one.
 
-Or run the underlying commands directly:
-
-```sh
-gofmt -l .
-go vet ./...
-go test ./...
-```
-
-The fixture harness lives in `idl/fixtures_test.go`:
-
-- every valid fixture must parse;
-- every syntax-level invalid fixture must produce the expected error
-  (normalized substring match, mirroring the upstream Java harness);
-- the semantic invalid fixtures are exercised by `model/` and `validation/`
-  tests, which assert the event ID, message, and source location.
-
-The semantic model tests also assemble every valid fixture and compare
-flattened mixin models against the upstream `.flattened.smithy` fixtures.
-
-The `codegen/golang` tests generate the weather and validator fixtures, compare
-them against `codegen/golang/testdata/golden/<case>`, compile and vet the
-generated modules, and run generated validator behavior tests in a temporary
-module. Update golden output intentionally with:
+The `codegen/golang` tests generate the weather, validator, library, and HTTP
+fixtures, compare golden output, compile and vet the generated modules, and run
+generated validator behavior tests in a temporary module. The
+`codegen/openapi` and `codegen/docs` tests compare OpenAPI JSON and Markdown
+golden files and cover documentation traits, examples, and multi-generator CLI
+runs. Update golden output intentionally with:
 
 ```sh
 go test ./codegen/golang -run TestGolden -update
+go test ./codegen/openapi -update-openapi
+go test ./codegen/docs -update-docs
 ```
 
 A short fuzz smoke run:
@@ -392,29 +585,56 @@ make fuzz                  # 10s by default
 make fuzz FUZZTIME=30s
 ```
 
-## Plan
+## Scope and limitations
 
-The overview is in [PLAN.md](PLAN.md). Each milestone is one unit of work and
-one document:
+The detailed, section-by-section view is in [`COVERAGE.md`](COVERAGE.md). The
+short version:
 
-1. [Parser foundation](docs/plan/01-parser-foundation.md) — skeleton, fixture
-   harness, tokenizer, parser, AST. **Implemented.**
-2. [Semantic model](docs/plan/02-semantic-model.md) — resolution, prelude,
-   mixins, closures, structural validation. **Implemented.**
-3. [Codegen core + Go models](docs/plan/03-codegen-core-and-go.md) — plugin
-   contract, Go types and validators. **Implemented.**
-4. [Generic HTTP+JSON](docs/plan/04-http-json-protocol.md) — `httpJson`
-   protocol, generated client and server. **Implemented.**
-5. [Smithy 2.1 semantics](docs/plan/05-smithy-2.1-semantics.md) — synthetic
-   inline collections, member indexes, and feature-coverage docs.
-   **Implemented.**
+- **No AWS.** No AWS protocols, auth, signing, endpoints, SigV4, or AWS traits.
+- **No full validator framework.** No selector engine, complete built-in
+  validator suite, suppressions, severity overrides, custom validators, or model
+  transforms.
+- **No build/project system.** No `smithy-build.json`, projections, or
+  Maven/Gradle/plugin resolution.
+- **No JSON AST output.** Loading is supported; `model --json` is a debug view,
+  not a Smithy JSON AST serializer.
+- **One code target.** Go is the only language target. OpenAPI and docs are
+  additional output formats, not language backends.
+- **One OpenAPI shape.** OpenAPI 3.0.3 JSON only; no YAML or 3.1 output yet.
+  No `servers`, security schemes, AWS extensions, or OpenAPI features that
+  Smithy cannot express.
+- **Docs are API docs.** The generated Markdown covers the service, operations,
+  schemas, and examples. Hand-written guides and tutorials remain hand-written.
+  Redoc is loaded from a CDN; the HTML is not a pre-rendered static site.
+- **One wire protocol.** `gosmithy.protocols#httpJson` is the only protocol. It
+  has no AWS compatibility, signing, authentication, retries, streaming, event
+  streams, compression, multipart, XML, CBOR, or content negotiation.
+- **Limited trait semantics.** Many traits are parsed and stored but have no
+  effect. Resource binding rules, `@idRef` selectors, `@indexed` validation,
+  endpoint traits, authentication traits, and most behavior traits are not
+  modeled beyond their data.
+- **Go model limits.** `@default` and `@clientOptional` are not applied; union
+  values and map keys are not validated; `@range` on `bigInteger`/`bigDecimal`
+  is not generated; `@pattern` uses Go's RE2 syntax; validators do not detect
+  cycles; client input and server output are not validated.
+- **HTTP binding limits.** Literal query strings in URIs and greedy labels are
+  rejected; ambiguous routes are rejected instead of resolved by specificity;
+  restricted headers are not diagnosed; error structures do not support
+  `@httpHeader` or `@httpPayload`; header timestamps default to `date-time`
+  instead of `http-date`.
+
+`COVERAGE.md` records the exact boundary, including the parts that are partial.
+
+## License
+
+Apache-2.0. See [`LICENSE`](LICENSE).
 
 ## Attribution
 
-The fixture corpus under `testdata/loader/` is derived from the Smithy Java
+The fixture corpus under `testdata/loader/` is derived from the upstream Smithy
 repository and is licensed under Apache-2.0. See
 [`testdata/NOTICE`](testdata/NOTICE) and [`testdata/LICENSE`](testdata/LICENSE).
+
 The embedded prelude in [`model/prelude.smithy`](model/prelude.smithy) is based
-on `smithy-model/src/main/resources/.../prelude.smithy` in the same repository,
-with one gosmithy extension (`EPOCH_MILLISECONDS` in `timestampFormat`), and is
-licensed under Apache-2.0.
+on the upstream prelude, with one gosmithy extension (`epoch-milliseconds` in
+`timestampFormat`), and is licensed under Apache-2.0.

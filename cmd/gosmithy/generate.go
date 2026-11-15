@@ -9,7 +9,9 @@ import (
 	"strings"
 
 	"github.com/tespeleta/gosmithy/codegen"
+	"github.com/tespeleta/gosmithy/codegen/docs"
 	"github.com/tespeleta/gosmithy/codegen/golang"
+	"github.com/tespeleta/gosmithy/codegen/openapi"
 	"github.com/tespeleta/gosmithy/model"
 	"github.com/tespeleta/gosmithy/protocol/httpjson"
 	"github.com/tespeleta/gosmithy/validation"
@@ -25,12 +27,29 @@ func (o *optionFlags) Set(value string) error {
 	return nil
 }
 
+// generatorFlags collects repeatable --generator flags. A single flag may
+// contain a comma-separated list.
+type generatorFlags []string
+
+func (g *generatorFlags) String() string { return strings.Join(*g, ",") }
+
+func (g *generatorFlags) Set(value string) error {
+	for _, part := range strings.Split(value, ",") {
+		name := strings.TrimSpace(part)
+		if name == "" {
+			return fmt.Errorf("generator name must not be empty")
+		}
+		*g = append(*g, name)
+	}
+	return nil
+}
+
 func runGenerate(args []string) error {
 	fs := flag.NewFlagSet("generate", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	generatorName := fs.String("generator", golang.GeneratorName, "code generator to run")
+	var generatorNames generatorFlags
+	fs.Var(&generatorNames, "generator", "generator namespace or namespace:option (repeatable/comma-separated; default all)")
 	service := fs.String("service", "", "service shape ID to generate")
-	protocolName := fs.String("protocol", "", "wire protocol to generate (for example gosmithy.protocols#httpJson)")
 	module := fs.String("module", "", "Go module path for the generated module")
 	out := fs.String("out", "", "output directory")
 	clean := fs.Bool("clean", false, "remove the output directory before writing")
@@ -38,7 +57,7 @@ func runGenerate(args []string) error {
 	var rawOptions optionFlags
 	fs.Var(&rawOptions, "opt", "generator option key=value (repeatable)")
 	fs.Usage = func() {
-		fmt.Fprintln(fs.Output(), "Usage: gosmithy generate --service <id> --module <path> --out <dir> [--protocol <id>] [flags] <file>...")
+		fmt.Fprintln(fs.Output(), "Usage: gosmithy generate --service <id> --out <dir> [--generator <namespace[:option]>]... [flags] <file>...")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -50,8 +69,8 @@ func runGenerate(args []string) error {
 
 	registry := newGeneratorRegistry()
 	if *list {
-		for _, name := range registry.Names() {
-			fmt.Fprintln(os.Stdout, name)
+		for _, namespace := range registry.Namespaces() {
+			fmt.Fprintf(os.Stdout, "%s: %s\n", namespace, strings.Join(registry.Options(namespace), ", "))
 		}
 		return nil
 	}
@@ -63,10 +82,6 @@ func runGenerate(args []string) error {
 	if *service == "" {
 		fs.Usage()
 		return fmt.Errorf("generate requires --service")
-	}
-	if *module == "" {
-		fs.Usage()
-		return fmt.Errorf("generate requires --module")
 	}
 	if *out == "" {
 		fs.Usage()
@@ -85,10 +100,26 @@ func runGenerate(args []string) error {
 	if err != nil {
 		return err
 	}
-	if existing, ok := options["module"]; ok && existing != *module {
-		return fmt.Errorf("--module %q conflicts with --opt module=%q", *module, existing)
+	selections, err := registry.Resolve([]string(generatorNames))
+	if err != nil {
+		return err
 	}
-	options["module"] = *module
+	names := make([]string, 0, len(selections))
+	generators := make([]codegen.Generator, 0, len(selections))
+	for _, selection := range selections {
+		names = append(names, selection.Name)
+		generators = append(generators, selection.Generator)
+	}
+	if needsGoModule(names) && *module == "" {
+		fs.Usage()
+		return fmt.Errorf("generate requires --module when a Go generator is selected")
+	}
+	if *module != "" {
+		if existing, ok := options["module"]; ok && existing != *module {
+			return fmt.Errorf("--module %q conflicts with --opt module=%q", *module, existing)
+		}
+		options["module"] = *module
+	}
 
 	files, err := parseFiles(fs.Args())
 	if err != nil {
@@ -96,16 +127,12 @@ func runGenerate(args []string) error {
 	}
 
 	var selectedProtocol *codegen.Protocol
-	if *protocolName != "" {
-		protocol, _, err := httpjson.Select(*protocolName)
-		if err != nil {
-			return err
-		}
-		selectedProtocol = protocol
+	if needsHTTPProtocol(names) {
+		selectedProtocol = &codegen.Protocol{ID: httpjson.ID}
 	}
 
 	// Built-in protocol definitions are always assembled so @httpJson resolves
-	// even for model-only generation; --protocol only selects the wire protocol.
+	// even for model-only generation.
 	files, err = appendBuiltinProtocols(files)
 	if err != nil {
 		return err
@@ -128,18 +155,14 @@ func runGenerate(args []string) error {
 		return &exitError{code: 1}
 	}
 
-	gen, ok := registry.Get(*generatorName)
-	if !ok {
-		return fmt.Errorf("unknown generator %q (available: %s)", *generatorName, registry.String())
-	}
 	req := &codegen.Request{
 		Model:    m,
 		Service:  serviceID,
 		Version:  model.V2_0,
 		Protocol: selectedProtocol,
 		Target: codegen.Target{
-			Name:       *generatorName,
-			Generators: []string{*generatorName},
+			Name:       strings.Join(names, "+"),
+			Generators: names,
 		},
 		Options: options,
 		Files:   fs.Args(),
@@ -149,13 +172,49 @@ func runGenerate(args []string) error {
 		Clean:  *clean,
 		Output: os.Stdout,
 	}
-	_, err = runner.Run(context.Background(), req, []codegen.Generator{gen})
+	_, err = runner.Run(context.Background(), req, generators)
 	return err
+}
+
+func needsGoModule(names []string) bool {
+	for _, name := range names {
+		if strings.HasPrefix(name, golang.Namespace+":") {
+			return true
+		}
+	}
+	return false
+}
+
+func needsHTTPProtocol(names []string) bool {
+	for _, name := range names {
+		switch {
+		case name == golang.Namespace+":"+golang.OptionServer:
+			return true
+		case name == golang.Namespace+":"+golang.OptionClient:
+			return true
+		case strings.HasPrefix(name, openapi.Namespace+":"):
+			return true
+		case strings.HasPrefix(name, docs.Namespace+":"):
+			return true
+		}
+	}
+	return false
 }
 
 func newGeneratorRegistry() *codegen.Registry {
 	registry := codegen.NewRegistry()
-	registry.Register(golang.GeneratorName, func() codegen.Generator { return golang.New() })
+	registry.RegisterNamespace(golang.Namespace, map[string]codegen.Factory{
+		golang.OptionModel:  func() codegen.Generator { return golang.NewModel() },
+		golang.OptionServer: func() codegen.Generator { return golang.NewServer() },
+		golang.OptionClient: func() codegen.Generator { return golang.NewClient() },
+	})
+	registry.RegisterNamespace(openapi.Namespace, map[string]codegen.Factory{
+		openapi.OptionDescriptor: func() codegen.Generator { return openapi.NewDescriptor() },
+		openapi.OptionIndex:      func() codegen.Generator { return openapi.NewIndex() },
+	})
+	registry.RegisterNamespace(docs.Namespace, map[string]codegen.Factory{
+		docs.OptionMarkdown: func() codegen.Generator { return docs.New() },
+	})
 	return registry
 }
 

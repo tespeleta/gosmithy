@@ -155,7 +155,7 @@ func (g *generator) emitMemberValue(w *fileWriter, member, target *model.Shape, 
 		w.Line("errs.AddNested(%s, %s.Validate())", path, expr)
 		return nil
 	case model.TypeUnion:
-		// Unions expose no Validate method in M3; requiredness is checked
+		// Unions expose no Validate method; requiredness is checked
 		// through the member itself.
 		return nil
 	}

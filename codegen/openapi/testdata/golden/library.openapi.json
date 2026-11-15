@@ -1,0 +1,363 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Library",
+    "description": "A small library service used to demonstrate Go code generation.",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/books": {
+      "get": {
+        "summary": "ListBooks",
+        "operationId": "ListBooks",
+        "parameters": [
+          {
+            "name": "genre",
+            "in": "query",
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/GenreList"
+                }
+              ],
+              "minItems": 1,
+              "maxItems": 20
+            },
+            "style": "form",
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ListBooks 200 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "books": {
+                      "$ref": "#/components/schemas/BookList"
+                    },
+                    "shelves": {
+                      "$ref": "#/components/schemas/Shelf"
+                    }
+                  },
+                  "required": [
+                    "books"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/books/search": {
+      "post": {
+        "summary": "Search",
+        "operationId": "Search",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "genre": {
+                    "$ref": "#/components/schemas/Genre"
+                  },
+                  "minRating": {
+                    "type": "integer",
+                    "format": "int32",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "query": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "query"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Search 200 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "$ref": "#/components/schemas/SearchResults"
+                    },
+                    "total": {
+                      "type": "integer",
+                      "format": "int32"
+                    }
+                  },
+                  "required": [
+                    "results",
+                    "total"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BookNotFound 400 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookNotFound"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/books/{isbn}": {
+      "get": {
+        "summary": "GetBook",
+        "operationId": "GetBook",
+        "parameters": [
+          {
+            "name": "isbn",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^(97[89])?[0-9]{10}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "GetBook 200 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "book": {
+                      "$ref": "#/components/schemas/Book"
+                    },
+                    "related": {
+                      "$ref": "#/components/schemas/SearchResults"
+                    }
+                  },
+                  "required": [
+                    "book"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BookNotFound 400 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookNotFound"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Author": {
+        "type": "object",
+        "properties": {
+          "bio": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "Book": {
+        "type": "object",
+        "properties": {
+          "author": {
+            "$ref": "#/components/schemas/Author"
+          },
+          "genre": {
+            "$ref": "#/components/schemas/Genre"
+          },
+          "isbn": {
+            "type": "string",
+            "pattern": "^(97[89])?[0-9]{10}$"
+          },
+          "rating": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "readingLevel": {
+            "$ref": "#/components/schemas/ReadingLevel"
+          },
+          "tags": {
+            "$ref": "#/components/schemas/Tags"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "author",
+          "genre",
+          "isbn",
+          "title"
+        ]
+      },
+      "BookList": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/Book"
+        }
+      },
+      "BookNotFound": {
+        "type": "object",
+        "properties": {
+          "isbn": {
+            "type": "string",
+            "pattern": "^(97[89])?[0-9]{10}$"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "isbn",
+          "message"
+        ]
+      },
+      "ExternalReference": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ]
+      },
+      "Genre": {
+        "type": "string",
+        "description": "The kind of publication.",
+        "enum": [
+          "fiction",
+          "non-fiction",
+          "reference"
+        ]
+      },
+      "GenreList": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/Genre"
+        }
+      },
+      "Magazine": {
+        "type": "object",
+        "properties": {
+          "issue": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "issue",
+          "title"
+        ]
+      },
+      "ReadingLevel": {
+        "type": "integer",
+        "format": "int32",
+        "description": "A coarse reading level.",
+        "enum": [
+          1,
+          2,
+          3
+        ]
+      },
+      "SearchResult": {
+        "description": "A search result is exactly one of the supported publication kinds.",
+        "oneOf": [
+          {
+            "type": "object",
+            "title": "book",
+            "properties": {
+              "book": {
+                "$ref": "#/components/schemas/Book"
+              }
+            },
+            "required": [
+              "book"
+            ]
+          },
+          {
+            "type": "object",
+            "title": "magazine",
+            "properties": {
+              "magazine": {
+                "$ref": "#/components/schemas/Magazine"
+              }
+            },
+            "required": [
+              "magazine"
+            ]
+          },
+          {
+            "type": "object",
+            "title": "external",
+            "properties": {
+              "external": {
+                "$ref": "#/components/schemas/ExternalReference"
+              }
+            },
+            "required": [
+              "external"
+            ]
+          }
+        ]
+      },
+      "SearchResults": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/SearchResult"
+        }
+      },
+      "Shelf": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/Book"
+        }
+      },
+      "Tags": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

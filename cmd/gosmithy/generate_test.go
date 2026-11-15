@@ -17,7 +17,7 @@ func TestGenerateWeather(t *testing.T) {
 		return run([]string{
 			"generate",
 			"--service", "example.weather#Weather",
-			"--generator", "go",
+			"--generator", "go:model",
 			"--module", "example.com/weather",
 			"--out", out,
 			weatherPath(),
@@ -65,8 +65,9 @@ func TestGenerateListGenerators(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.TrimSpace(output) != "go" {
-		t.Errorf("list output = %q, want go", output)
+	want := "docs: markdown\ngo: client, model, server\nopenapi: descriptor, index"
+	if strings.TrimSpace(output) != want {
+		t.Errorf("list output = %q, want %q", output, want)
 	}
 }
 
@@ -128,6 +129,7 @@ func TestGenerateOptionWarning(t *testing.T) {
 		return run([]string{
 			"generate",
 			"--service", "example.weather#Weather",
+			"--generator", "go:model",
 			"--module", "example.com/x",
 			"--out", t.TempDir(),
 			"--opt", "future=yes",
@@ -166,7 +168,6 @@ func TestGenerateLibraryHTTP(t *testing.T) {
 			"generate",
 			"--service", "example.library#Library",
 			"--generator", "go",
-			"--protocol", "gosmithy.protocols#httpJson",
 			"--module", "example.com/library",
 			"--out", out,
 			library,
@@ -196,20 +197,20 @@ func TestGenerateLibraryHTTP(t *testing.T) {
 	runGoCommand(t, out, "test", "./...")
 }
 
-func TestGenerateUnknownProtocol(t *testing.T) {
+func TestGenerateProtocolFlagIsRemoved(t *testing.T) {
 	library := filepath.Join("..", "..", "testdata", "library.smithy")
 	_, err := captureStdout(t, func() error {
 		return run([]string{
 			"generate",
 			"--service", "example.library#Library",
-			"--protocol", "aws#restJson1",
-			"--module", "example.com/library",
+			"--generator", "openapi:descriptor",
+			"--protocol", "gosmithy.protocols#httpJson",
 			"--out", t.TempDir(),
 			library,
 		})
 	})
-	if err == nil || !strings.Contains(err.Error(), "unknown protocol") {
-		t.Fatalf("error = %v, want unknown protocol", err)
+	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Fatalf("error = %v, want removed --protocol flag", err)
 	}
 }
 
@@ -220,6 +221,7 @@ func TestGenerateModelOnlyHasNoProtocolCode(t *testing.T) {
 		return run([]string{
 			"generate",
 			"--service", "example.library#Library",
+			"--generator", "go:model",
 			"--module", "example.com/library",
 			"--out", out,
 			library,
@@ -276,7 +278,7 @@ func TestGenerateClean(t *testing.T) {
 		args := append([]string{
 			"generate",
 			"--service", "example.weather#Weather",
-			"--generator", "go",
+			"--generator", "go:model",
 			"--module", "example.com/weather",
 			"--out", out,
 		}, extra...)
@@ -315,7 +317,7 @@ func TestGenerateJSONASTMatchesIDL(t *testing.T) {
 		args := []string{
 			"generate",
 			"--service", "example.weather#Weather",
-			"--generator", "go",
+			"--generator", "go:model",
 			"--module", "example.com/weather",
 			"--out", out,
 		}
@@ -378,4 +380,196 @@ func directoryFiles(t *testing.T, root string) map[string][]byte {
 		t.Fatal(err)
 	}
 	return files
+}
+
+func TestGenerateOpenAPIWithoutModule(t *testing.T) {
+	docs := filepath.Join("..", "..", "testdata", "docs.smithy")
+	out := filepath.Join(t.TempDir(), "site")
+	output, err := captureStdout(t, func() error {
+		return run([]string{
+			"generate",
+			"--service", "example.docs#Docs",
+			"--generator", "openapi:descriptor",
+			"--out", out,
+			docs,
+		})
+	})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if !strings.Contains(output, "1 file(s) written") {
+		t.Errorf("output = %q", output)
+	}
+	data, err := os.ReadFile(filepath.Join(out, "openapi.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"openapi": "3.0.3"`) {
+		t.Errorf("unexpected OpenAPI output: %s", data)
+	}
+}
+
+func TestGenerateDocsWithoutModule(t *testing.T) {
+	docs := filepath.Join("..", "..", "testdata", "docs.smithy")
+	out := filepath.Join(t.TempDir(), "site")
+	if _, err := captureStdout(t, func() error {
+		return run([]string{
+			"generate",
+			"--service", "example.docs#Docs",
+			"--generator", "openapi:index,docs:markdown",
+			"--out", out,
+			docs,
+		})
+	}); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	for _, name := range []string{"docs/index.html", "docs/README.md", "docs/openapi.json"} {
+		if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(name))); err != nil {
+			t.Errorf("missing %s: %v", name, err)
+		}
+	}
+}
+
+func TestGenerateMultipleGenerators(t *testing.T) {
+	library := filepath.Join("..", "..", "testdata", "library.smithy")
+	out := filepath.Join(t.TempDir(), "gen")
+	output, err := captureStdout(t, func() error {
+		return run([]string{
+			"generate",
+			"--service", "example.library#Library",
+			"--generator", "go:model,go:server,go:client,openapi:descriptor,openapi:index,docs:markdown",
+			"--module", "example.com/library",
+			"--out", out,
+			library,
+		})
+	})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if !strings.Contains(output, "written") {
+		t.Errorf("output = %q", output)
+	}
+	for _, name := range []string{
+		"go.mod", "service.go", "server.go", "client.go", "openapi.json",
+		"docs/index.html", "docs/README.md", "docs/openapi.json",
+	} {
+		if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(name))); err != nil {
+			t.Errorf("missing %s: %v", name, err)
+		}
+	}
+	runGoCommand(t, out, "build", "./...")
+}
+
+func TestGenerateSplitHTTPGenerators(t *testing.T) {
+	library := filepath.Join("..", "..", "testdata", "library.smithy")
+	cases := []struct {
+		name      string
+		generator string
+		want      []string
+		absent    []string
+	}{
+		{
+			name:      "server",
+			generator: "go:model,go:server",
+			want:      []string{"go.mod", "service.go", "server.go"},
+			absent:    []string{"client.go"},
+		},
+		{
+			name:      "client",
+			generator: "go:model,go:client",
+			want:      []string{"go.mod", "client.go"},
+			absent:    []string{"server.go", "service.go"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := filepath.Join(t.TempDir(), "gen")
+			if _, err := captureStdout(t, func() error {
+				return run([]string{
+					"generate",
+					"--service", "example.library#Library",
+					"--generator", tc.generator,
+					"--module", "example.com/library",
+					"--out", out,
+					library,
+				})
+			}); err != nil {
+				t.Fatalf("generate: %v", err)
+			}
+			for _, name := range tc.want {
+				if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(name))); err != nil {
+					t.Errorf("missing %s: %v", name, err)
+				}
+			}
+			for _, name := range tc.absent {
+				if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(name))); err == nil {
+					t.Errorf("%s should not be generated", name)
+				}
+			}
+			runGoCommand(t, out, "build", "./...")
+		})
+	}
+}
+
+func TestGenerateOpenAPIDefaultsProtocol(t *testing.T) {
+	library := filepath.Join("..", "..", "testdata", "library.smithy")
+	out := filepath.Join(t.TempDir(), "api")
+	if _, err := captureStdout(t, func() error {
+		return run([]string{
+			"generate",
+			"--service", "example.library#Library",
+			"--generator", "openapi:descriptor",
+			"--out", out,
+			library,
+		})
+	}); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "openapi.json")); err != nil {
+		t.Fatalf("missing openapi.json: %v", err)
+	}
+}
+
+func TestGenerateDuplicateOptionIsDeduped(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "gen")
+	if _, err := captureStdout(t, func() error {
+		return run([]string{
+			"generate",
+			"--service", "example.weather#Weather",
+			"--generator", "go:model,go:model",
+			"--module", "example.com/weather",
+			"--out", out,
+			weatherPath(),
+		})
+	}); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "types", "types.go")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGenerateOmitsGeneratorSelectsAll(t *testing.T) {
+	library := filepath.Join("..", "..", "testdata", "library.smithy")
+	out := filepath.Join(t.TempDir(), "gen")
+	if _, err := captureStdout(t, func() error {
+		return run([]string{
+			"generate",
+			"--service", "example.library#Library",
+			"--module", "example.com/library",
+			"--out", out,
+			library,
+		})
+	}); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	for _, name := range []string{
+		"go.mod", "client.go", "server.go", "openapi.json",
+		"docs/index.html", "docs/README.md", "docs/openapi.json",
+	} {
+		if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(name))); err != nil {
+			t.Errorf("missing %s: %v", name, err)
+		}
+	}
+	runGoCommand(t, out, "build", "./...")
 }

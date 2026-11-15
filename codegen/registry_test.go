@@ -63,3 +63,48 @@ func TestGeneratorFunc(t *testing.T) {
 		t.Fatal("GeneratorFunc was not called")
 	}
 }
+
+func TestRegistryNamespacesAndResolution(t *testing.T) {
+	r := NewRegistry()
+	gen := func() Generator { return GeneratorFunc(nil) }
+	r.RegisterNamespace("go", map[string]Factory{"model": gen, "server": gen, "client": gen})
+	r.RegisterNamespace("openapi", map[string]Factory{"descriptor": gen, "index": gen})
+	r.RegisterNamespace("docs", map[string]Factory{"markdown": gen})
+
+	if got, want := r.Namespaces(), []string{"docs", "go", "openapi"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("Namespaces = %v, want %v", got, want)
+	}
+	if got, want := r.Options("go"), []string{"client", "model", "server"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("Options(go) = %v, want %v", got, want)
+	}
+
+	selections, err := r.Resolve([]string{"go", "openapi:descriptor"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, selection := range selections {
+		names = append(names, selection.Name)
+	}
+	want := []string{"go:client", "go:model", "go:server", "openapi:descriptor"}
+	if !reflect.DeepEqual(names, want) {
+		t.Errorf("Resolve names = %v, want %v", names, want)
+	}
+
+	all, err := r.Resolve(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := len(all), 6; got != want {
+		t.Errorf("Resolve(nil) = %d, want %d", got, want)
+	}
+	if _, err := r.Resolve([]string{"missing"}); err == nil {
+		t.Error("Resolve(missing) succeeded")
+	}
+	if _, err := r.Resolve([]string{"go:missing"}); err == nil {
+		t.Error("Resolve(go:missing) succeeded")
+	}
+	if _, err := r.Resolve([]string{"go:"}); err == nil {
+		t.Error("Resolve(go:) succeeded")
+	}
+}

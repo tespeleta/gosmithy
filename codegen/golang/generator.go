@@ -17,18 +17,63 @@ import (
 	"github.com/tespeleta/gosmithy/validation"
 )
 
-// GeneratorName is the registry name of the Go generator.
-const GeneratorName = "go"
+const (
+	// Namespace is the Go generator namespace.
+	Namespace = "go"
+	// GeneratorName is the legacy combined Go option name.
+	GeneratorName = Namespace
+	// OptionModel emits the base Go module: types, validators, and codecs.
+	OptionModel = "model"
+	// OptionServer emits the base module plus the HTTP server side.
+	OptionServer = "server"
+	// OptionClient emits the base module plus the HTTP client side.
+	OptionClient = "client"
+)
 
-// New returns the Go generator.
-func New() codegen.Generator { return &generator{} }
+type generateMode int
+
+const (
+	modeBase generateMode = iota
+	modeFull
+	modeServer
+	modeClient
+)
+
+// New returns the Go generator. With an explicit protocol and no split HTTP
+// generators selected it emits types, client, and server; otherwise it emits
+// the model-only base.
+func New() codegen.Generator { return &generator{mode: modeFull, name: GeneratorName} }
+
+// NewModel returns the base Go generator: types, validators, and codecs.
+func NewModel() codegen.Generator {
+	return &generator{mode: modeBase, name: Namespace + ":" + OptionModel}
+}
+
+// NewServer returns a generator that emits the base module plus the HTTP
+// server files.
+func NewServer() codegen.Generator {
+	return &generator{mode: modeServer, name: Namespace + ":" + OptionServer}
+}
+
+// NewClient returns a generator that emits the base module plus the HTTP
+// client files.
+func NewClient() codegen.Generator {
+	return &generator{mode: modeClient, name: Namespace + ":" + OptionClient}
+}
 
 // Name implements codegen.NamedGenerator so the runner can identify the Go
 // generator in error messages.
-func (g *generator) Name() string { return GeneratorName }
+func (g *generator) Name() string {
+	if g.name != "" {
+		return g.name
+	}
+	return GeneratorName
+}
 
 // generator holds the per-request state of one Go generation run.
 type generator struct {
+	mode    generateMode
+	name    string
 	req     *codegen.Request
 	m       *model.Model
 	service *model.Shape
@@ -81,9 +126,18 @@ func (g *generator) Generate(ctx context.Context, req *codegen.Request) (*codege
 		return nil, fmt.Errorf("golang: `%s` is a %s shape, not a service", req.Service, service.Type)
 	}
 
+	mode := g.mode
+	if mode == modeFull {
+		if req.Protocol == nil || hasSplitHTTPGenerator(req.Target.Generators) {
+			mode = modeBase
+		}
+	}
+	g.mode = mode
 	g.req = req
 	g.m = req.Model
 	g.service = service
+	emitBase := g.emitBase()
+	emitProtocolRuntime := g.emitProtocolRuntime()
 	g.typeNames = make(map[model.ShapeID]string)
 	g.fieldNames = make(map[model.ShapeID]string)
 	g.packageNames = make(map[string]model.ShapeID)
@@ -108,41 +162,54 @@ func (g *generator) Generate(ctx context.Context, req *codegen.Request) (*codege
 	g.buildTypeNames()
 	g.buildFieldNames()
 
-	if req.Protocol != nil {
-		g.protocol = req.Protocol
-		g.rootPackage = goPackageName(g.module)
-		if !httpjson.Is(req.Protocol.ID) {
+	if mode != modeBase {
+		if req.Protocol == nil {
 			g.diagnosticAt(validation.Danger, service.Source,
-				"Unsupported protocol `%s`; the Go generator currently implements %s", req.Protocol.ID, httpjson.TraitID)
+				"the Go HTTP generators require a protocol; the CLI supplies %s", httpjson.TraitID)
 		} else {
-			bindings, events := httpbinding.Index(g.m, service.ID)
-			g.bindings = bindings
-			for _, event := range events {
-				g.diagnostics = append(g.diagnostics, codegen.Diagnostic{
-					Severity: event.Severity,
-					Message:  event.Message,
-					Path:     event.Source.Filename,
-					Line:     event.Source.Line,
-					Column:   event.Source.Column,
-				})
+			g.protocol = req.Protocol
+			g.rootPackage = goPackageName(g.module)
+			if !httpjson.Is(req.Protocol.ID) {
+				g.diagnosticAt(validation.Danger, service.Source,
+					"Unsupported protocol `%s`; the Go generator currently implements %s", req.Protocol.ID, httpjson.TraitID)
+			} else {
+				bindings, events := httpbinding.Index(g.m, service.ID)
+				g.bindings = bindings
+				for _, event := range events {
+					g.diagnostics = append(g.diagnostics, codegen.Diagnostic{
+						Severity: event.Severity,
+						Message:  event.Message,
+						Path:     event.Source.Filename,
+						Line:     event.Source.Line,
+						Column:   event.Source.Column,
+					})
+				}
+				g.buildOperationNames()
+				g.checkServiceProtocol()
 			}
-			g.buildOperationNames()
-			g.checkServiceProtocol()
 		}
 	}
 
-	files := make([]codegen.File, 0, 8)
-	files = append(files, codegen.File{
-		Path:    "go.mod",
-		Content: []byte(fmt.Sprintf("module %s\n\ngo 1.22\n", g.module)),
-	})
+	files := make([]codegen.File, 0, 12)
+	if emitBase {
+		files = append(files, codegen.File{
+			Path:    "go.mod",
+			Content: []byte(fmt.Sprintf("module %s\n\ngo 1.22\n", g.module)),
+		})
+	}
 
-	runtimeFiles, err := runtime.FilesFor(req.Protocol != nil)
+	runtimeFiles, err := runtime.FilesFor(mode != modeBase)
 	if err != nil {
 		return nil, err
 	}
 	runtimePaths := make([]string, 0, len(runtimeFiles))
 	for path := range runtimeFiles {
+		if !emitBase && path != "internal/smithy/http.go" {
+			continue
+		}
+		if !emitProtocolRuntime && path == "internal/smithy/http.go" {
+			continue
+		}
 		runtimePaths = append(runtimePaths, path)
 	}
 	sort.Strings(runtimePaths)
@@ -151,47 +218,68 @@ func (g *generator) Generate(ctx context.Context, req *codegen.Request) (*codege
 		files = append(files, codegen.File{Path: path, Content: content})
 	}
 
-	typesFile, err := g.emitTypesFile()
-	if err != nil {
-		return nil, fmt.Errorf("golang: generating types/types.go: %w", err)
-	}
-	files = append(files, codegen.File{Path: "types/types.go", Content: typesFile})
+	if emitBase {
+		typesFile, err := g.emitTypesFile()
+		if err != nil {
+			return nil, fmt.Errorf("golang: generating types/types.go: %w", err)
+		}
+		files = append(files, codegen.File{Path: "types/types.go", Content: typesFile})
 
-	enumsFile, err := g.emitEnumsFile()
-	if err != nil {
-		return nil, fmt.Errorf("golang: generating types/enums.go: %w", err)
-	}
-	files = append(files, codegen.File{Path: "types/enums.go", Content: enumsFile})
+		enumsFile, err := g.emitEnumsFile()
+		if err != nil {
+			return nil, fmt.Errorf("golang: generating types/enums.go: %w", err)
+		}
+		files = append(files, codegen.File{Path: "types/enums.go", Content: enumsFile})
 
-	unionsFile, err := g.emitUnionsFile()
-	if err != nil {
-		return nil, fmt.Errorf("golang: generating types/unions.go: %w", err)
-	}
-	files = append(files, codegen.File{Path: "types/unions.go", Content: unionsFile})
+		unionsFile, err := g.emitUnionsFile()
+		if err != nil {
+			return nil, fmt.Errorf("golang: generating types/unions.go: %w", err)
+		}
+		files = append(files, codegen.File{Path: "types/unions.go", Content: unionsFile})
 
-	validateFile, err := g.emitValidateFile()
-	if err != nil {
-		return nil, fmt.Errorf("golang: generating types/validate.go: %w", err)
-	}
-	files = append(files, codegen.File{Path: "types/validate.go", Content: validateFile})
+		validateFile, err := g.emitValidateFile()
+		if err != nil {
+			return nil, fmt.Errorf("golang: generating types/validate.go: %w", err)
+		}
+		files = append(files, codegen.File{Path: "types/validate.go", Content: validateFile})
 
-	jsonFile, err := g.emitJSONFile()
-	if err != nil {
-		return nil, fmt.Errorf("golang: generating types/json.go: %w", err)
-	}
-	if jsonFile != nil {
-		files = append(files, codegen.File{Path: "types/json.go", Content: jsonFile})
+		jsonFile, err := g.emitJSONFile()
+		if err != nil {
+			return nil, fmt.Errorf("golang: generating types/json.go: %w", err)
+		}
+		if jsonFile != nil {
+			files = append(files, codegen.File{Path: "types/json.go", Content: jsonFile})
+		}
 	}
 
 	if g.protocol != nil && httpjson.Is(g.protocol.ID) {
-		protocolFiles := []struct {
+		protocolFiles := make([]struct {
 			path string
 			emit func() ([]byte, error)
-		}{
-			{"service.go", g.emitServiceFile},
-			{"protocol.go", g.emitProtocolFile},
-			{"client.go", g.emitClientFile},
-			{"server.go", g.emitServerFile},
+		}, 0, 4)
+		if mode == modeFull || mode == modeServer {
+			protocolFiles = append(protocolFiles, struct {
+				path string
+				emit func() ([]byte, error)
+			}{"service.go", g.emitServiceFile})
+		}
+		if emitProtocolRuntime {
+			protocolFiles = append(protocolFiles, struct {
+				path string
+				emit func() ([]byte, error)
+			}{"protocol.go", g.emitProtocolFile})
+		}
+		if mode == modeFull || mode == modeClient {
+			protocolFiles = append(protocolFiles, struct {
+				path string
+				emit func() ([]byte, error)
+			}{"client.go", g.emitClientFile})
+		}
+		if mode == modeFull || mode == modeServer {
+			protocolFiles = append(protocolFiles, struct {
+				path string
+				emit func() ([]byte, error)
+			}{"server.go", g.emitServerFile})
 		}
 		for _, item := range protocolFiles {
 			content, err := item.emit()
@@ -204,6 +292,57 @@ func (g *generator) Generate(ctx context.Context, req *codegen.Request) (*codege
 
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 	return &codegen.Response{Files: files, Diagnostics: g.diagnostics}, nil
+}
+
+func (g *generator) hasGenerator(name string) bool {
+	for _, selected := range g.req.Target.Generators {
+		if selected == name {
+			return true
+		}
+	}
+	return false
+}
+
+func (g *generator) hasOption(option string) bool {
+	return g.hasGenerator(Namespace + ":" + option)
+}
+
+// emitBase reports whether this generator writes the shared base files. When
+// several Go generators run together, one of them owns go.mod, types, and the
+// base runtime to avoid duplicate writes.
+func (g *generator) emitBase() bool {
+	switch g.mode {
+	case modeBase, modeFull:
+		return true
+	case modeServer:
+		return !g.hasOption(OptionModel)
+	case modeClient:
+		return !g.hasOption(OptionModel) && !g.hasOption(OptionServer)
+	default:
+		return true
+	}
+}
+
+// emitProtocolRuntime reports whether this generator writes protocol.go and
+// internal/smithy/http.go. The server owns them when both sides run together.
+func (g *generator) emitProtocolRuntime() bool {
+	switch g.mode {
+	case modeBase:
+		return false
+	case modeClient:
+		return !g.hasOption(OptionServer)
+	default:
+		return true
+	}
+}
+
+func hasSplitHTTPGenerator(names []string) bool {
+	for _, name := range names {
+		if name != GeneratorName {
+			return true
+		}
+	}
+	return false
 }
 
 func (g *generator) checkOptions() {

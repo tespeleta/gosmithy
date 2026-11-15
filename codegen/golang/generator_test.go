@@ -74,7 +74,7 @@ func TestGolden(t *testing.T) {
 			for _, file := range files {
 				switch filepath.Base(file.Path) {
 				case "client.go", "server.go", "service.go", "protocol.go":
-					t.Errorf("Milestone 3 must not generate %s", file.Path)
+					t.Errorf("model-only generation must not generate %s", file.Path)
 				}
 				if bytes.Contains(file.Content, []byte("net/http")) {
 					t.Errorf("%s looks like protocol code", file.Path)

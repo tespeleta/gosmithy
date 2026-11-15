@@ -36,8 +36,7 @@ type Options struct {
 	// that requests a newer version is rejected. A zero value means V2_1.
 	Version Version
 	// DefaultVersion is assumed when a file has no $version control
-	// statement. A zero value means V2_0, matching PLAN.md's "assume 2.0"
-	// guidance for the MVP.
+	// statement. A zero value means V2_0, matching the project's 2.0 default.
 	DefaultVersion Version
 }
 
