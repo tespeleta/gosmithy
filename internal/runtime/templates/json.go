@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"strconv"
 	"strings"
 	"time"
@@ -136,42 +135,6 @@ func UnmarshalDocument(raw []byte) (any, error) {
 	var value any
 	if err := decoder.Decode(&value); err != nil {
 		return nil, fmt.Errorf("smithy: decoding document: %w", err)
-	}
-	return value, nil
-}
-
-// MarshalBigDecimal encodes a big.Float as a JSON number without losing
-// precision. A nil value encodes as null.
-func MarshalBigDecimal(value *big.Float) (json.RawMessage, error) {
-	if value == nil {
-		return json.RawMessage("null"), nil
-	}
-	text := value.Text('g', -1)
-	switch text {
-	case "NaN", "+Inf", "-Inf", "Inf":
-		return nil, fmt.Errorf("smithy: cannot encode non-finite bigDecimal %q", text)
-	}
-	return json.RawMessage(text), nil
-}
-
-// UnmarshalBigDecimal decodes a JSON number or quoted decimal string into a
-// big.Float. The precision is chosen by the caller to preserve the literal's
-// significant digits instead of rounding to float64.
-func UnmarshalBigDecimal(raw json.RawMessage, precision uint) (*big.Float, error) {
-	text := strings.TrimSpace(string(raw))
-	if text == "" || text == "null" {
-		return nil, nil
-	}
-	if strings.HasPrefix(text, "\"") {
-		var decoded string
-		if err := json.Unmarshal(raw, &decoded); err != nil {
-			return nil, err
-		}
-		text = decoded
-	}
-	value, _, err := big.ParseFloat(text, 10, precision, big.ToNearestEven)
-	if err != nil {
-		return nil, fmt.Errorf("smithy: parsing bigDecimal %q: %w", text, err)
 	}
 	return value, nil
 }

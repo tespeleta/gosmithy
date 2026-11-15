@@ -260,10 +260,12 @@ specification.
   - [ ] Trait node values `"NaN"`, `"Infinity"`, and `"-Infinity"` are not
         accepted by the generic trait-value validator.
 - [x] **bigInteger / bigDecimal**
-  - [x] Model shapes and `*big.Int` / `*big.Float` mappings.
+  - [x] Model shapes and `*big.Int` / `*Decimal` mappings.
   - [x] bigInteger is emitted as a JSON number.
-  - [x] bigDecimal uses a custom JSON codec that avoids float64 precision loss
-        and accepts a JSON number or quoted decimal string.
+  - [x] bigDecimal uses the generated `types.Decimal` wire type, which
+        preserves the JSON number literal instead of converting to a binary
+        float. Strict input accepts a JSON number only; quoted decimals are
+        accepted under `@relaxedInput`.
   - [ ] `@range` is not generated for bigInteger or bigDecimal (silently
         skipped).
   - [ ] String-encoded bigInteger/bigDecimal trait values are not accepted by
@@ -794,6 +796,10 @@ handling.
 - [x] **`protocolDefinition` trait**
   - [x] `gosmithy.protocols#httpJson` is defined in embedded Smithy IDL with
         `@protocolDefinition` and `@trait(selector: "service")`.
+  - [x] `gosmithy.protocols#relaxedInput` is defined in the same model with
+        `@trait(selector: "service, member")` and a Boolean `enabled` member
+        defaulting to true. The Go generator applies member-over-service
+        precedence to scalar operation input members only.
   - [x] The protocol trait assembles with the user model by default.
   - [x] `use gosmithy.protocols#httpJson` resolves without extra flags.
   - [x] Package-level `httpjson.Select` for protocol IDs; the CLI always uses
@@ -959,7 +965,7 @@ protocol, not an AWS protocol. The binding index lives in
   - [x] String payloads are text.
   - [x] Document payloads use the custom JSON document decoder.
   - [x] Union payloads use generated union codecs.
-  - [x] bigDecimal payloads avoid float64 precision loss.
+  - [x] bigDecimal payloads preserve the decimal literal through `types.Decimal`.
   - [x] Timestamp payloads use the effective format.
   - [x] Other shapes use JSON.
   - [x] `@mediaType` on the member or target controls `Content-Type`.
@@ -1495,8 +1501,12 @@ project includes what the generator can emit.
 - [x] All Smithy simple types mapped to Go (see [Simple types](#2-simple-types)).
 - [x] Structures, lists, sets, maps, Unit, unions, enums, intEnums, and errors.
 - [x] Error types implement `error`, `ErrorCode()`, and `ErrorFault()`.
-- [x] Nullability rules: pointers for absent scalars/aggregates, nilable
-      slices/maps/blobs/documents, nil interfaces for absent unions.
+- [x] Nullability rules: `Optional[T]` for non-required structure scalars by
+      default, plain `T` for required scalars, pointers for HTTP-bound and
+      payload members, nilable slices/maps/blobs/documents, nil interfaces for
+      absent unions. `--useOptionals=false` restores pointer scalars.
+- [x] `Optional[T]` provides `IsSet`, `IsNull`, `HasValue`, `Value`, `Set`,
+      `SetNull`, and works with `omitzero` (Go 1.24).
 - [x] `@sparse` pointer-like elements and values.
 - [x] `@jsonName` tags and custom codec keys.
 - [x] Synthetic 2.1 collections as named Go collection types.
@@ -1508,7 +1518,8 @@ project includes what the generator can emit.
       docs output; there is no protocol flag.
 - [x] `types.Unit` is always emitted.
 - [x] Deterministic output, `go/format`, sorted imports.
-- [x] Generated `go.mod` with no third-party dependencies.
+- [x] Generated `go.mod` with no third-party dependencies; `go 1.24` when
+      optionals are enabled, `go 1.22` otherwise.
 - [ ] `@default` and `@clientOptional` semantics.
 - [ ] Input/output-specific Go type variants.
 - [ ] Service/resource client abstractions and pagination helpers.
@@ -1518,7 +1529,9 @@ project includes what the generator can emit.
 
 - [x] `Validate()` on every structure, named list, named set, and named map.
 - [x] Nil receivers are valid.
-- [x] `@required` uses nil as absence; empty values are not absent.
+- [x] `@required` uses nil as absence for pointers/nilables; required scalars
+      are plain values and `Optional` presence is checked with `HasValue`;
+      empty values are not absent.
 - [x] `@length` for strings (code points), blobs (bytes), and collections.
 - [x] `@range` for integers and floats; wide bounds do not overflow.
 - [x] `@pattern` with Go RE2 and clear generation errors.

@@ -10,8 +10,9 @@ import (
 func (g *generator) emitTypesFile() ([]byte, error) {
 	doc := fmt.Sprintf(
 		"Package types contains Go data types and validators generated from the Smithy service %s.\n\n"+
-			"Member presence is represented by pointers or nil slices/maps. Requiredness and "+
-			"constraints are enforced by the Validate methods; callers should not build cyclic values.\n\n"+
+			"Member presence is represented by Optional, pointers, or nil slices/maps. Constraints are "+
+			"enforced by the Validate methods; callers should not build cyclic values. Required plain "+
+			"scalars are not presence-checked.\n\n"+
 			"Known limitations: @default and @clientOptional are not applied, @length counts Unicode "+
 			"code points for strings and bytes for blobs, @pattern uses Go's RE2 regular "+
 			"expressions rather than ECMAScript, and @range on bigInteger/bigDecimal is not generated.",
@@ -52,7 +53,8 @@ func (g *generator) emitStructure(w *fileWriter, shape *model.Shape) {
 			if !ok || typ == "" {
 				typ = "any"
 			}
-			w.Line("%s %s `json:%q`", g.fieldName(member), typ, g.memberJSONName(member)+",omitempty")
+			target, _ := g.m.Shape(member.Target)
+			w.Line("%s %s `json:%q`", g.fieldName(member), typ, g.fieldJSONTag(member, target))
 		}
 		w.Out()
 		w.Line("}")
@@ -98,6 +100,7 @@ func (g *generator) emitErrorMethods(w *fileWriter, shape *model.Shape) {
 	}
 
 	messageField := ""
+	var messageMember, messageTarget *model.Shape
 	for _, member := range shape.Members {
 		if !strings.EqualFold(member.ID.Member, "message") {
 			continue
@@ -105,6 +108,8 @@ func (g *generator) emitErrorMethods(w *fileWriter, shape *model.Shape) {
 		target, ok := g.m.Shape(member.Target)
 		if ok && g.isStringLike(target) {
 			messageField = g.fieldName(member)
+			messageMember = member
+			messageTarget = target
 			break
 		}
 	}
@@ -112,9 +117,24 @@ func (g *generator) emitErrorMethods(w *fileWriter, shape *model.Shape) {
 	w.Line("// Error implements error.")
 	w.Line("func (e *%s) Error() string {", name)
 	w.In()
-	if messageField == "" {
+	switch {
+	case messageField == "":
 		w.Line("return %s", quoted(code))
-	} else {
+	case g.optionalFor(messageMember, messageTarget):
+		w.Line("if e != nil && e.%s.HasValue() && e.%s.MustValue() != \"\" {", messageField, messageField)
+		w.In()
+		w.Line("return e.%s.MustValue()", messageField)
+		w.Out()
+		w.Line("}")
+		w.Line("return %s", quoted(code))
+	case g.fieldIsPlainValue(messageMember, messageTarget):
+		w.Line("if e != nil && e.%s != \"\" {", messageField)
+		w.In()
+		w.Line("return e.%s", messageField)
+		w.Out()
+		w.Line("}")
+		w.Line("return %s", quoted(code))
+	default:
 		w.Line("if e != nil && e.%s != nil && *e.%s != \"\" {", messageField, messageField)
 		w.In()
 		w.Line("return string(*e.%s)", messageField)

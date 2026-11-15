@@ -611,9 +611,6 @@ func (g *generator) emitClientBody(w *fileWriter, bundle *httpbinding.Binding, n
 				expr = "*" + field
 			}
 			switch target.Type {
-			case model.TypeBigDecimal:
-				w.AddImport(g.module+"/internal/smithy", "")
-				w.Line("payload, err := smithy.MarshalBigDecimal(%s)", expr)
 			case model.TypeTimestamp:
 				w.AddImport(g.module+"/internal/smithy", "")
 				format := g.timestampFormatFor(member, target)
@@ -824,19 +821,6 @@ func (g *generator) emitClientResponsePayload(w *fileWriter, bundle *httpbinding
 		w.Line("if len(responseBody) > 0 {")
 		w.In()
 		w.Line("value, err := smithy.UnmarshalDocument(responseBody)")
-		w.Line("if err != nil {")
-		w.In()
-		w.Line("return nil, fmt.Errorf(%s, err)", quoted(name+": decoding response payload: %w"))
-		w.Out()
-		w.Line("}")
-		w.Line("%s = value", field)
-		w.Out()
-		w.Line("}")
-	case model.TypeBigDecimal:
-		w.AddImport(g.module+"/internal/smithy", "")
-		w.Line("if len(responseBody) > 0 {")
-		w.In()
-		w.Line("value, err := smithy.UnmarshalBigDecimal(responseBody, 256)")
 		w.Line("if err != nil {")
 		w.In()
 		w.Line("return nil, fmt.Errorf(%s, err)", quoted(name+": decoding response payload: %w"))
@@ -1412,17 +1396,51 @@ func (g *generator) emitServerDecode(w *fileWriter, bundle *httpbinding.Binding,
 				w.Line("%s = value", field)
 				w.Out()
 				w.Line("}")
-			case model.TypeBigDecimal:
-				w.AddImport(g.module+"/internal/smithy", "")
+			case model.TypeByte, model.TypeShort, model.TypeInteger, model.TypeLong,
+				model.TypeFloat, model.TypeDouble, model.TypeBigInteger:
+				if g.isRelaxed(member) {
+					w.Line("if len(body) > 0 {")
+					w.In()
+					g.emitRelaxedNumberAssign(w, target, "body", field, true,
+						"return nil, fmt.Errorf(\"decoding request payload: %w\", err)")
+					w.Out()
+					w.Line("}")
+					break
+				}
+				w.AddImport("encoding/json", "")
 				w.Line("if len(body) > 0 {")
 				w.In()
-				w.Line("value, err := smithy.UnmarshalBigDecimal(body, 256)")
-				w.Line("if err != nil {")
+				w.Line("if err := json.Unmarshal(body, &%s); err != nil {", field)
 				w.In()
 				w.Line("return nil, fmt.Errorf(\"decoding request payload: %%w\", err)")
 				w.Out()
 				w.Line("}")
-				w.Line("%s = value", field)
+				w.Out()
+				w.Line("}")
+			case model.TypeBigDecimal:
+				if g.isRelaxed(member) {
+					w.AddImport(g.module+"/types", "")
+					w.Line("if len(body) > 0 {")
+					w.In()
+					w.Line("var value types.Decimal")
+					w.Line("if err := types.UnmarshalDecimalRelaxed(body, &value); err != nil {")
+					w.In()
+					w.Line("return nil, fmt.Errorf(\"decoding request payload: %%w\", err)")
+					w.Out()
+					w.Line("}")
+					w.Line("%s = &value", field)
+					w.Out()
+					w.Line("}")
+					break
+				}
+				w.AddImport("encoding/json", "")
+				w.Line("if len(body) > 0 {")
+				w.In()
+				w.Line("if err := json.Unmarshal(body, &%s); err != nil {", field)
+				w.In()
+				w.Line("return nil, fmt.Errorf(\"decoding request payload: %%w\", err)")
+				w.Out()
+				w.Line("}")
 				w.Out()
 				w.Line("}")
 			case model.TypeTimestamp:
@@ -1769,9 +1787,6 @@ func (g *generator) emitServerResponsePayload(w *fileWriter, bundle *httpbinding
 					expr = "*" + field
 				}
 				switch target.Type {
-				case model.TypeBigDecimal:
-					w.AddImport(g.module+"/internal/smithy", "")
-					w.Line("data, err := smithy.MarshalBigDecimal(%s)", expr)
 				case model.TypeTimestamp:
 					w.AddImport(g.module+"/internal/smithy", "")
 					format := g.timestampFormatFor(member, target)
@@ -1936,8 +1951,8 @@ func (g *generator) emitParseValue(w *fileWriter, member, target *model.Shape, s
 		w.Out()
 		w.Line("}")
 	case model.TypeBigDecimal:
-		w.AddImport("math/big", "")
-		w.Line("%s, _, err := big.ParseFloat(%s, 10, 256, big.ToNearestEven)", name, source)
+		w.AddImport(g.module+"/types", "")
+		w.Line("%s, err := types.NewDecimal(%s)", name, source)
 		w.Line("if err != nil {")
 		w.In()
 		fail()
@@ -2008,7 +2023,7 @@ func (g *generator) formatValueExpr(w *fileWriter, member, target *model.Shape, 
 	case model.TypeBigInteger:
 		return expr + ".String()"
 	case model.TypeBigDecimal:
-		return expr + ".Text('g', -1)"
+		return "(" + expr + ").String()"
 	case model.TypeTimestamp:
 		format := g.timestampFormatFor(member, target)
 		return "formatTimestamp(" + expr + ", " + quoted(format) + ")"

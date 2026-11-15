@@ -168,7 +168,7 @@ func runProtocolGenerator(t *testing.T, m *model.Model, service model.ShapeID, m
 		Version:  model.V2_0,
 		Protocol: &codegen.Protocol{ID: httpjson.ID},
 		Target:   codegen.Target{Name: GeneratorName, Generators: []string{GeneratorName}},
-		Options:  map[string]string{"module": module},
+		Options:  map[string]string{"module": module, "useOptionals": "false"},
 	}
 	resp, err := New().Generate(context.Background(), req)
 	if err != nil {
@@ -783,20 +783,17 @@ func TestProtocolRoundTrip(t *testing.T) {
 		if !ok {
 			t.Fatal("invalid big integer literal")
 		}
-		decimal, _, err := big.ParseFloat("12345.678901234567890123456789", 10, 256, big.ToNearestEven)
-		if err != nil {
-			t.Fatal(err)
-		}
+		bigDecimal := types.MustDecimal("12345.678901234567890123456789")
 		document := map[string]any{"big": json.Number("12345678901234567890")}
-		out, err := client.EchoNumbers(ctx, &types.EchoNumbersInput{BigInteger: integer, BigDecimal: decimal, Document: document})
+		out, err := client.EchoNumbers(ctx, &types.EchoNumbersInput{BigInteger: integer, BigDecimal: &bigDecimal, Document: document})
 		if err != nil {
 			t.Fatalf("EchoNumbers: %v", err)
 		}
 		if out.BigInteger == nil || out.BigInteger.Cmp(integer) != 0 {
 			t.Errorf("bigInteger = %v, want %v", out.BigInteger, integer)
 		}
-		if out.BigDecimal == nil || out.BigDecimal.Cmp(decimal) != 0 {
-			t.Errorf("bigDecimal = %v, want %v", out.BigDecimal, decimal)
+		if out.BigDecimal == nil || out.BigDecimal.String() != bigDecimal.String() {
+			t.Errorf("bigDecimal = %v, want %v", out.BigDecimal, bigDecimal)
 		}
 		roundTripped, ok := out.Document.(map[string]any)
 		if !ok {

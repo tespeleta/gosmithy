@@ -26,7 +26,7 @@ func TestGenerateWeather(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
-	if !strings.Contains(output, "7 file(s) written") {
+	if !strings.Contains(output, "8 file(s) written") {
 		t.Errorf("output = %q, want file summary", output)
 	}
 	for _, name := range []string{
@@ -37,6 +37,7 @@ func TestGenerateWeather(t *testing.T) {
 		"types/enums.go",
 		"types/unions.go",
 		"types/validate.go",
+		"types/optional.go",
 	} {
 		if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(name))); err != nil {
 			t.Errorf("missing generated file %s: %v", name, err)
@@ -55,6 +56,44 @@ func TestGenerateWeather(t *testing.T) {
 	}
 	if !strings.Contains(string(types), "type GetCityInput struct") {
 		t.Errorf("types.go missing GetCityInput:\n%s", types)
+	}
+}
+
+func TestGenerateUseOptionalsFalse(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "gen")
+	output, err := captureStdout(t, func() error {
+		return run([]string{
+			"generate",
+			"--service", "example.weather#Weather",
+			"--generator", "go:model",
+			"--useOptionals=false",
+			"--module", "example.com/weather",
+			"--out", out,
+			weatherPath(),
+		})
+	})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if !strings.Contains(output, "7 file(s) written") {
+		t.Errorf("output = %q, want 7 files", output)
+	}
+	gomod, err := os.ReadFile(filepath.Join(out, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(gomod), "go 1.22") {
+		t.Errorf("go.mod = %q, want go 1.22", gomod)
+	}
+	if _, err := os.Stat(filepath.Join(out, "types", "optional.go")); !os.IsNotExist(err) {
+		t.Errorf("types/optional.go should not exist: %v", err)
+	}
+	types, err := os.ReadFile(filepath.Join(out, "types", "types.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(types), "Optional[") {
+		t.Errorf("types.go still uses Optional:\n%s", types)
 	}
 }
 

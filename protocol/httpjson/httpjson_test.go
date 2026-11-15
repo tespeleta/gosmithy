@@ -58,10 +58,43 @@ func TestDefinitionAssembles(t *testing.T) {
 		model.TraitJSONName.String(),
 		model.TraitMediaType.String(),
 		model.TraitTimestampFmt.String(),
+		RelaxedInputTrait.String(),
 	} {
 		if !found[want] {
 			t.Errorf("protocol definition does not list %s", want)
 		}
+	}
+}
+
+func TestDefinitionHasRelaxedInput(t *testing.T) {
+	file, err := Definition()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := model.Assemble([]*idl.File{file}, model.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	shape, ok := m.Shape(RelaxedInputTrait)
+	if !ok {
+		t.Fatalf("relaxed-input trait %s is not in the model", RelaxedInputTrait)
+	}
+	if !shape.HasTrait(model.TraitTrait) {
+		t.Errorf("%s is not marked @trait", RelaxedInputTrait)
+	}
+	selector, ok := shape.GetTrait(model.TraitTrait)
+	if !ok {
+		t.Fatal("missing trait trait")
+	}
+	if value, ok := selector.Value.GetString("selector"); !ok || value != "service, member" {
+		t.Errorf("relaxed-input selector = %q, want %q", value, "service, member")
+	}
+	enabled, ok := shape.GetMember("enabled")
+	if !ok {
+		t.Fatal("relaxed-input trait has no enabled member")
+	}
+	if !enabled.HasTrait(model.TraitDefault) {
+		t.Error("relaxed-input enabled member has no default")
 	}
 }
 

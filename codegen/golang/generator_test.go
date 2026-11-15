@@ -350,6 +350,9 @@ func runGenerator(t *testing.T, m *model.Model, service model.ShapeID, module st
 	if module != "" {
 		options["module"] = module
 	}
+	if _, ok := options["useOptionals"]; !ok {
+		options["useOptionals"] = "false"
+	}
 	req := &codegen.Request{
 		Model:   m,
 		Service: service,
@@ -460,6 +463,7 @@ import (
 )
 
 func ptrString(v string) *string    { return &v }
+func ptrDecimal(v string) *Decimal  { d := MustDecimal(v); return &d }
 func ptrInt32(v int32) *int32       { return &v }
 func ptrKind(v ThingKind) *ThingKind { return &v }
 
@@ -629,7 +633,7 @@ func TestScalarTypes(t *testing.T) {
 		AFloat:      &f32,
 		ADouble:     &f64,
 		ABigInteger: big.NewInt(1),
-		ABigDecimal: big.NewFloat(1),
+		ABigDecimal: ptrDecimal("1"),
 		ATimestamp:  &now,
 		ADocument:   map[string]any{"a": 1},
 		OptionalMap: OptionalAttributes{"key": nil},

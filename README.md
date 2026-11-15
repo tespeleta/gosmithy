@@ -252,11 +252,15 @@ gen/
   internal/smithy/
     json.go
     validate.go
+    relaxed.go     # when relaxed numeric members are generated
   types/
     types.go
     enums.go
     unions.go
     validate.go
+    decimal.go     # when the model uses bigDecimal
+    relaxed.go     # when relaxed boolean members are generated
+    optional.go    # when non-required scalar members use Optional
 ```
 
 The generated module uses only the standard library. The Go target maps Smithy
@@ -269,7 +273,7 @@ shapes as follows:
 | `boolean` | `bool` |
 | `byte` / `short` / `integer` / `long` | `int8` / `int16` / `int32` / `int64` |
 | `float` / `double` | `float32` / `float64` |
-| `bigInteger` / `bigDecimal` | `*big.Int` / `*big.Float` |
+| `bigInteger` / `bigDecimal` | `*big.Int` / `*Decimal` |
 | `timestamp` | `time.Time` |
 | `document` | `any` |
 | `list` / `set` | `[]T` |
@@ -278,6 +282,32 @@ shapes as follows:
 | `union` | interface plus per-member wrapper structs |
 | `enum` | named `string` plus constants |
 | `intEnum` | named `int32` plus constants |
+
+### Optional Go members
+
+By default (`--useOptionals=true`), non-`@required` scalar members are
+`Optional[T]`, and `@required` scalar members are plain `T`:
+
+```go
+type In struct {
+    Name  Optional[string]    `json:"name,omitzero"`
+    Count Optional[int32]     `json:"count,omitzero"`
+    Ok    Optional[bool]      `json:"ok,omitzero"`
+    Id    string              `json:"id"` // @required
+}
+
+in.Name.Set("x")
+if in.Count.HasValue() {
+    use(in.Count.MustValue())
+}
+```
+
+`Optional` distinguishes absent, explicit `null`, and a value; `omitzero`
+omits absent fields. It needs Go 1.24, so generated `go.mod` declares
+`go 1.24`. Pass `--useOptionals=false` to restore the pointer representation
+and `go 1.22`. HTTP-bound and `@httpPayload` members keep pointers regardless
+of this setting. `bigDecimal` uses `Optional[Decimal]`, and `bigInteger` uses
+`Optional[*big.Int]`.
 | `Unit` | `struct{}` |
 | error structure | struct implementing `error` + `ErrorCode()` |
 
@@ -343,6 +373,47 @@ Unbound members are serialized into the JSON body. Bound fields are removed
 before marshaling and are overwritten from the HTTP message after unmarshaling.
 A payload may not be combined with unbound body members. Unknown JSON fields are
 ignored when decoding structures, for forward compatibility.
+
+### Relaxed input
+
+The optional `gosmithy.protocols#relaxedInput` trait makes JSON input decoding
+accept quoted scalar values. It can be applied to a service or to a scalar
+member; a member setting wins over the service setting.
+
+```smithy
+use gosmithy.protocols#relaxedInput
+
+@relaxedInput
+service S { ... }
+
+structure In {
+    // Strict for this service.
+    @relaxedInput(enabled: false)
+    count: Integer
+
+    // Relaxed for this service.
+    ok: Boolean
+}
+```
+
+| Smithy target | Strict input | Relaxed input |
+|---|---|---|
+| `boolean` | `true`, `false` | also `"true"`, `"false"` |
+| `byte`...`double` | JSON number | also a quoted JSON number |
+| `bigInteger` | JSON integer | also a quoted integer |
+| `bigDecimal` | JSON number | also a quoted number |
+
+Relaxed input applies only to operation inputs and only to direct scalar
+members; collections, maps, and aggregate members are not relaxed in v1.
+HTTP label, query, header, and response-code bindings are always strings and
+are not affected. Encoding is always strict: generated code writes bare JSON
+booleans and numbers.
+
+`bigDecimal` maps to `types.Decimal`, which stores the JSON number literal and
+preserves its digits (including trailing zeros and exponents). Construct one
+with `types.NewDecimal`/`types.MustDecimal`, or `DecimalFromInt64` and
+`DecimalFromBigInt`. Strict `bigDecimal` input accepts a JSON number only; a
+quoted decimal is accepted only under `@relaxedInput`.
 
 The generated API is ordinary Go:
 
@@ -436,7 +507,9 @@ Generate one option, a namespace, or several namespaces:
 `--generator` is repeatable, and each value may also be a comma-separated list.
 The runner merges the outputs and reports the total number of files written.
 The wire protocol is always `gosmithy.protocols#httpJson`, the only built-in
-protocol; there is no protocol flag.
+protocol; there is no protocol flag. `--useOptionals=false` switches generated
+Go scalar members back from `Optional[T]` to pointers and keeps the generated
+module on Go 1.22.
 
 The generators cover the documentation traits that affect API documentation:
 

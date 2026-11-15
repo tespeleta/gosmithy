@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/tespeleta/gosmithy/codegen"
@@ -105,6 +106,19 @@ type generator struct {
 	operationNames map[model.ShapeID]string
 	rootPackage    string
 	localCounter   int
+
+	// inputShapes is the closure of every operation input. Relaxed decoding is
+	// applied only to members of these shapes.
+	inputShapes map[model.ShapeID]bool
+	// relaxed maps member shape IDs to their effective relaxed-input setting.
+	relaxed map[model.ShapeID]bool
+
+	needsDecimal        bool
+	needsRelaxedBool    bool
+	needsRelaxedNumbers bool
+	needsOptional       bool
+
+	useOptionals bool
 }
 
 // Generate implements codegen.Generator.
@@ -136,6 +150,14 @@ func (g *generator) Generate(ctx context.Context, req *codegen.Request) (*codege
 	g.req = req
 	g.m = req.Model
 	g.service = service
+	g.useOptionals = true
+	if raw, ok := req.Options["useOptionals"]; ok {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			return nil, fmt.Errorf("golang: invalid useOptionals value %q", raw)
+		}
+		g.useOptionals = value
+	}
 	emitBase := g.emitBase()
 	emitProtocolRuntime := g.emitProtocolRuntime()
 	g.typeNames = make(map[model.ShapeID]string)
@@ -161,6 +183,9 @@ func (g *generator) Generate(ctx context.Context, req *codegen.Request) (*codege
 	g.selectShapes(closure)
 	g.buildTypeNames()
 	g.buildFieldNames()
+	g.computeRelaxedInput(closure)
+	g.computeOptionalNeeds()
+	g.reserveGeneratedTypes()
 
 	if mode != modeBase {
 		if req.Protocol == nil {
@@ -194,13 +219,22 @@ func (g *generator) Generate(ctx context.Context, req *codegen.Request) (*codege
 	if emitBase {
 		files = append(files, codegen.File{
 			Path:    "go.mod",
-			Content: []byte(fmt.Sprintf("module %s\n\ngo 1.22\n", g.module)),
+			Content: []byte(fmt.Sprintf("module %s\n\ngo %s\n", g.module, g.goVersion())),
 		})
 	}
 
 	runtimeFiles, err := runtime.FilesFor(mode != modeBase)
 	if err != nil {
 		return nil, err
+	}
+	if g.needsRelaxedNumbers && emitBase {
+		relaxedFiles, err := runtime.RelaxedFiles()
+		if err != nil {
+			return nil, err
+		}
+		for path, content := range relaxedFiles {
+			runtimeFiles[path] = content
+		}
 	}
 	runtimePaths := make([]string, 0, len(runtimeFiles))
 	for path := range runtimeFiles {
@@ -224,6 +258,28 @@ func (g *generator) Generate(ctx context.Context, req *codegen.Request) (*codege
 			return nil, fmt.Errorf("golang: generating types/types.go: %w", err)
 		}
 		files = append(files, codegen.File{Path: "types/types.go", Content: typesFile})
+
+		if g.needsDecimal {
+			decimalFile, err := g.emitDecimalFile()
+			if err != nil {
+				return nil, fmt.Errorf("golang: generating types/decimal.go: %w", err)
+			}
+			files = append(files, codegen.File{Path: "types/decimal.go", Content: decimalFile})
+		}
+		if g.needsRelaxedBool {
+			relaxedFile, err := g.emitRelaxedBoolFile()
+			if err != nil {
+				return nil, fmt.Errorf("golang: generating types/relaxed.go: %w", err)
+			}
+			files = append(files, codegen.File{Path: "types/relaxed.go", Content: relaxedFile})
+		}
+		if g.needsOptional {
+			optionalFile, err := g.emitOptionalFile()
+			if err != nil {
+				return nil, fmt.Errorf("golang: generating types/optional.go: %w", err)
+			}
+			files = append(files, codegen.File{Path: "types/optional.go", Content: optionalFile})
+		}
 
 		enumsFile, err := g.emitEnumsFile()
 		if err != nil {
@@ -355,7 +411,7 @@ func (g *generator) checkOptions() {
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		if key != "module" {
+		if key != "module" && key != "useOptionals" {
 			g.diagnostic(validation.Warning, idl.SourceLocation{}, "unknown Go generator option %q", key)
 		}
 	}
@@ -587,8 +643,7 @@ func (g *generator) valueType(target *model.Shape, w *fileWriter) (string, bool)
 		w.AddImport("math/big", "")
 		return "*big.Int", true
 	case model.TypeBigDecimal:
-		w.AddImport("math/big", "")
-		return "*big.Float", true
+		return "Decimal", true
 	case model.TypeTimestamp:
 		w.AddImport("time", "")
 		return "time.Time", true
@@ -635,6 +690,23 @@ func (g *generator) memberFieldType(member *model.Shape, w *fileWriter) (string,
 			"Member `%s` targets `%s`, which cannot be represented as a Go type", member.ID, member.Target)
 		return "", false
 	}
+	if g.optionalFor(member, target) {
+		inner, ok := g.optionalInnerType(member, target, w)
+		if !ok || inner == "" {
+			inner = "any"
+		}
+		return "Optional[" + inner + "]", true
+	}
+	if g.fieldIsPlainValue(member, target) {
+		inner, ok := g.plainInnerType(member, target, w)
+		if !ok || inner == "" {
+			inner = "any"
+		}
+		return inner, true
+	}
+	if target.Type == model.TypeBoolean && g.isRelaxed(member) {
+		return "*RelaxedBool", true
+	}
 	if fieldHasPointerWrapper(target) {
 		return "*" + typ, true
 	}
@@ -646,8 +718,7 @@ func (g *generator) memberFieldType(member *model.Shape, w *fileWriter) (string,
 func fieldHasPointerWrapper(target *model.Shape) bool {
 	switch target.Type {
 	case model.TypeBlob, model.TypeList, model.TypeSet, model.TypeMap,
-		model.TypeDocument, model.TypeBigInteger, model.TypeBigDecimal,
-		model.TypeUnion:
+		model.TypeDocument, model.TypeBigInteger, model.TypeUnion:
 		return false
 	default:
 		return true
@@ -711,7 +782,7 @@ func (g *generator) pointerize(typ string, target *model.Shape, w *fileWriter) s
 	switch target.Type {
 	case model.TypeBlob, model.TypeDocument:
 		return typ
-	case model.TypeBigInteger, model.TypeBigDecimal:
+	case model.TypeBigInteger:
 		return typ
 	case model.TypeUnion:
 		// A union is a Go interface; a nil interface already represents an
@@ -745,6 +816,9 @@ func (g *generator) unionValueType(member *model.Shape, w *fileWriter) (string, 
 		g.diagnosticAt(validation.Danger, member.Source,
 			"Member `%s` targets `%s`, which cannot be represented as a Go type", member.ID, member.Target)
 		return "", false
+	}
+	if target.Type == model.TypeBoolean && g.isRelaxed(member) {
+		return "RelaxedBool", true
 	}
 	switch target.Type {
 	case model.TypeStructure, model.TypeList, model.TypeSet, model.TypeMap:

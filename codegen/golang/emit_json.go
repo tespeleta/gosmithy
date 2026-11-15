@@ -1,6 +1,7 @@
 package golang
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/tespeleta/gosmithy/model"
@@ -24,21 +25,28 @@ import (
 // helper from its own UnmarshalJSON.
 func (g *generator) emitJSONFile() ([]byte, error) {
 	var shapes []*model.Shape
+	var relaxed []*model.Shape
 	for _, shape := range g.shapes {
 		if g.needsCustomJSON(shape) {
 			shapes = append(shapes, shape)
+			continue
+		}
+		if g.needsRelaxedStructJSON(shape) {
+			relaxed = append(relaxed, shape)
 		}
 	}
-	if len(shapes) == 0 {
+	if len(shapes) == 0 && len(relaxed) == 0 {
 		return nil, nil
 	}
 
-	w := newFileWriter("types", "JSON codecs for unions, formatted timestamps, and big decimals. "+
+	w := newFileWriter("types", "JSON codecs for unions, formatted timestamps, and relaxed input members. "+
 		"They implement the value encoding rules of gosmithy.protocols#httpJson.")
-	for i, shape := range shapes {
-		if i > 0 {
+	first := true
+	for _, shape := range shapes {
+		if !first {
 			w.Line("")
 		}
+		first = false
 		switch shape.Type {
 		case model.TypeStructure:
 			g.emitStructJSON(w, shape)
@@ -49,6 +57,13 @@ func (g *generator) emitJSONFile() ([]byte, error) {
 		case model.TypeMap:
 			g.emitMapJSON(w, shape)
 		}
+	}
+	for _, shape := range relaxed {
+		if !first {
+			w.Line("")
+		}
+		first = false
+		g.emitRelaxedStructUnmarshal(w, shape)
 	}
 	return w.Render()
 }
@@ -97,8 +112,6 @@ func (g *generator) memberNeedsCustomJSON(member, target *model.Shape) bool {
 		return true
 	case model.TypeTimestamp:
 		return g.timestampFormatFor(member, target) != model.TimestampDateTime
-	case model.TypeBigDecimal:
-		return true
 	case model.TypeDocument:
 		return true
 	default:
@@ -114,8 +127,6 @@ func (g *generator) collectionElementNeedsCustomJSON(member, target *model.Shape
 		return true
 	case model.TypeTimestamp:
 		return g.timestampFormatFor(member, target) != model.TimestampDateTime
-	case model.TypeBigDecimal:
-		return true
 	case model.TypeDocument:
 		return true
 	default:
@@ -179,6 +190,9 @@ func (g *generator) emitStructJSON(w *fileWriter, shape *model.Shape) {
 	w.Line("for key, raw := range fields {")
 	w.In()
 	w.Line("switch key {")
+	if len(shape.Members) > 0 {
+		w.AddImport("fmt", "")
+	}
 	for _, member := range shape.Members {
 		target, ok := g.m.Shape(member.Target)
 		if !ok {
@@ -186,8 +200,9 @@ func (g *generator) emitStructJSON(w *fileWriter, shape *model.Shape) {
 		}
 		w.Line("case %s:", quoted(g.memberJSONName(member)))
 		w.In()
-		address := target.Type == model.TypeTimestamp && fieldHasPointerWrapper(target)
-		g.emitUnmarshalValue(w, member, target, "v."+g.fieldName(member), address, "return err")
+		address := fieldHasPointerWrapper(target)
+		fail := fmt.Sprintf("return fmt.Errorf(%q, err)", memberErrorFormat(g.memberJSONName(member)))
+		g.emitUnmarshalValue(w, member, target, "raw", "v."+g.fieldName(member), address, fail)
 		w.Out()
 	}
 	w.Line("}")
@@ -200,9 +215,30 @@ func (g *generator) emitStructJSON(w *fileWriter, shape *model.Shape) {
 
 func (g *generator) emitMarshalMember(w *fileWriter, member, target *model.Shape) {
 	field := "v." + g.fieldName(member)
-	w.Line("if %s != nil {", field)
+	optional := g.optionalFor(member, target)
+	plain := g.fieldIsPlainValue(member, target)
+	switch {
+	case optional:
+		w.Line("if %s.IsSet() {", field)
+	case plain:
+		w.Line("{")
+	default:
+		w.Line("if %s != nil {", field)
+	}
 	w.In()
-	g.emitMarshalValue(w, member, target, targetValueExpr(target, field), "fields["+quoted(g.memberJSONName(member))+"]")
+	if optional && target.Type == model.TypeTimestamp && g.timestampFormatFor(member, target) != model.TimestampDateTime {
+		w.Line("if %s.IsNull() {", field)
+		w.In()
+		w.Line("fields[%s] = json.RawMessage(\"null\")", quoted(g.memberJSONName(member)))
+		w.Out()
+		w.Line("} else {")
+		w.In()
+		g.emitMarshalValue(w, member, target, field+".MustValue()", "fields["+quoted(g.memberJSONName(member))+"]")
+		w.Out()
+		w.Line("}")
+	} else {
+		g.emitMarshalValue(w, member, target, g.targetValueExpr(member, target, field), "fields["+quoted(g.memberJSONName(member))+"]")
+	}
 	w.Out()
 	w.Line("}")
 }
@@ -298,15 +334,6 @@ func (g *generator) emitUnionMarshal(w *fileWriter, member, target *model.Shape,
 		w.Out()
 		w.Line("}")
 		w.Line("return json.Marshal(map[string]any{%s: formatted})", quoted(g.memberJSONName(member)))
-	case model.TypeBigDecimal:
-		g.addSmithyImport(w)
-		w.Line("formatted, err := smithy.MarshalBigDecimal(%s)", valueExpr)
-		w.Line("if err != nil {")
-		w.In()
-		w.Line("return nil, err")
-		w.Out()
-		w.Line("}")
-		w.Line("return json.Marshal(map[string]json.RawMessage{%s: formatted})", quoted(g.memberJSONName(member)))
 	default:
 		w.Line("return json.Marshal(map[string]any{%s: %s})", quoted(g.memberJSONName(member)), valueExpr)
 	}
@@ -355,9 +382,12 @@ func (g *generator) emitUnionUnmarshal(w *fileWriter, member, target *model.Shap
 		w.Line("}")
 		w.Line("return &%s{Value: value}, nil", wrapper)
 	case model.TypeBigDecimal:
-		g.addSmithyImport(w)
-		w.Line("value, err := smithy.UnmarshalBigDecimal(raw, 256)")
-		w.Line("if err != nil {")
+		w.Line("var value Decimal")
+		if g.isRelaxed(member) {
+			w.Line("if err := UnmarshalDecimalRelaxed(raw, &value); err != nil {")
+		} else {
+			w.Line("if err := json.Unmarshal(raw, &value); err != nil {")
+		}
 		w.In()
 		w.Line("return nil, err")
 		w.Out()
@@ -379,11 +409,15 @@ func (g *generator) emitUnionUnmarshal(w *fileWriter, member, target *model.Shap
 		}
 		base := strings.TrimPrefix(valueType, "*")
 		w.Line("var value %s", base)
-		w.Line("if err := json.Unmarshal(raw, &value); err != nil {")
-		w.In()
-		w.Line("return nil, err")
-		w.Out()
-		w.Line("}")
+		if g.isRelaxed(member) && isRelaxedNumberTarget(target.Type) {
+			g.emitRelaxedNumberCall(w, target, "raw", "value", "return nil, err")
+		} else {
+			w.Line("if err := json.Unmarshal(raw, &value); err != nil {")
+			w.In()
+			w.Line("return nil, err")
+			w.Out()
+			w.Line("}")
+		}
 		if strings.HasPrefix(valueType, "*") {
 			w.Line("return &%s{Value: &value}, nil", wrapper)
 		} else {
@@ -457,7 +491,7 @@ func (g *generator) emitListJSON(w *fileWriter, shape *model.Shape) {
 		w.Out()
 		w.Line("}")
 	}
-	g.emitUnmarshalValue(w, member, target, "out[i]", sparse, "return err")
+	g.emitUnmarshalValue(w, member, target, "raw", "out[i]", sparse, "return err")
 	w.Out()
 	w.Line("}")
 	w.Line("*v = out")
@@ -529,7 +563,7 @@ func (g *generator) emitMapJSON(w *fileWriter, shape *model.Shape) {
 		w.Out()
 		w.Line("}")
 	}
-	g.emitUnmarshalValue(w, member, target, "out[key]", sparse, "return err")
+	g.emitUnmarshalValue(w, member, target, "raw", "out[key]", sparse, "return err")
 	w.Out()
 	w.Line("}")
 	w.Line("*v = out")
@@ -541,14 +575,18 @@ func (g *generator) emitMapJSON(w *fileWriter, shape *model.Shape) {
 // --- value helpers ------------------------------------------------------------
 
 // targetValueExpr turns a member field expression into the value expression
-// used when marshaling. Pointer-wrapped simple values are dereferenced so
-// custom timestamp and big-decimal helpers receive the value, not the pointer.
-func targetValueExpr(target *model.Shape, field string) string {
-	switch target.Type {
-	case model.TypeTimestamp, model.TypeBigDecimal:
-		if fieldHasPointerWrapper(target) {
-			return "*" + field
-		}
+// used when marshaling. Timestamp helpers receive a time.Time, so a
+// pointer-wrapped timestamp is dereferenced; Optional values are passed
+// through and format their inner value.
+func (g *generator) targetValueExpr(member, target *model.Shape, field string) string {
+	if target.Type != model.TypeTimestamp {
+		return field
+	}
+	if g.optionalFor(member, target) || g.fieldIsPlainValue(member, target) {
+		return field
+	}
+	if fieldHasPointerWrapper(target) {
+		return "*" + field
 	}
 	return field
 }
@@ -582,9 +620,6 @@ func (g *generator) emitMarshalValue(w *fileWriter, member, target *model.Shape,
 		w.Out()
 		w.Line("}")
 		w.Line("b, err := json.Marshal(formatted)")
-	case model.TypeBigDecimal:
-		g.addSmithyImport(w)
-		w.Line("b, err := smithy.MarshalBigDecimal(%s)", expr)
 	default:
 		w.Line("b, err := json.Marshal(%s)", expr)
 	}
@@ -599,15 +634,27 @@ func (g *generator) emitMarshalValue(w *fileWriter, member, target *model.Shape,
 // emitUnmarshalValue decodes raw into dest. When address is true, dest must be
 // a pointer variable (a *time.Time field or sparse element). fail is the
 // statement to execute on error, for example "return err" or "return nil, err".
-func (g *generator) emitUnmarshalValue(w *fileWriter, member, target *model.Shape, dest string, address bool, fail string) {
+func (g *generator) emitUnmarshalValue(w *fileWriter, member, target *model.Shape, rawExpr, dest string, address bool, fail string) {
+	if g.optionalFor(member, target) {
+		g.emitOptionalUnmarshal(w, member, target, rawExpr, dest, fail)
+		return
+	}
+	if g.fieldIsPlainValue(member, target) {
+		g.emitPlainUnmarshal(w, member, target, rawExpr, dest, fail)
+		return
+	}
+	if g.isRelaxed(member) && isRelaxedNumberTarget(target.Type) {
+		g.emitRelaxedNumberAssign(w, target, rawExpr, dest, address, fail)
+		return
+	}
 	switch target.Type {
 	case model.TypeUnion:
 		union, ok := g.typeName(target)
 		if !ok {
-			w.Line("_ = raw")
+			w.Line("_ = %s", rawExpr)
 			return
 		}
-		w.Line("value, err := Unmarshal%s(raw)", union)
+		w.Line("value, err := Unmarshal%s(%s)", union, rawExpr)
 		w.Line("if err != nil {")
 		w.In()
 		w.Line("%s", fail)
@@ -617,7 +664,7 @@ func (g *generator) emitUnmarshalValue(w *fileWriter, member, target *model.Shap
 	case model.TypeTimestamp:
 		format := g.timestampFormatFor(member, target)
 		if format == model.TimestampDateTime {
-			w.Line("if err := json.Unmarshal(raw, &%s); err != nil {", dest)
+			w.Line("if err := json.Unmarshal(%s, &%s); err != nil {", rawExpr, dest)
 			w.In()
 			w.Line("%s", fail)
 			w.Out()
@@ -626,7 +673,7 @@ func (g *generator) emitUnmarshalValue(w *fileWriter, member, target *model.Shap
 		}
 		g.addSmithyImport(w)
 		w.Line("var text string")
-		w.Line("if err := json.Unmarshal(raw, &text); err != nil {")
+		w.Line("if err := json.Unmarshal(%s, &text); err != nil {", rawExpr)
 		w.In()
 		w.Line("%s", fail)
 		w.Out()
@@ -643,17 +690,18 @@ func (g *generator) emitUnmarshalValue(w *fileWriter, member, target *model.Shap
 			w.Line("%s = parsed", dest)
 		}
 	case model.TypeBigDecimal:
-		g.addSmithyImport(w)
-		w.Line("value, err := smithy.UnmarshalBigDecimal(raw, 256)")
-		w.Line("if err != nil {")
+		if g.isRelaxed(member) {
+			g.emitRelaxedDecimalAssign(w, rawExpr, dest, address, fail)
+			return
+		}
+		w.Line("if err := json.Unmarshal(%s, &%s); err != nil {", rawExpr, dest)
 		w.In()
 		w.Line("%s", fail)
 		w.Out()
 		w.Line("}")
-		w.Line("%s = value", dest)
 	case model.TypeDocument:
 		g.addSmithyImport(w)
-		w.Line("value, err := smithy.UnmarshalDocument(raw)")
+		w.Line("value, err := smithy.UnmarshalDocument(%s)", rawExpr)
 		w.Line("if err != nil {")
 		w.In()
 		w.Line("%s", fail)
@@ -661,7 +709,7 @@ func (g *generator) emitUnmarshalValue(w *fileWriter, member, target *model.Shap
 		w.Line("}")
 		w.Line("%s = value", dest)
 	default:
-		w.Line("if err := json.Unmarshal(raw, &%s); err != nil {", dest)
+		w.Line("if err := json.Unmarshal(%s, &%s); err != nil {", rawExpr, dest)
 		w.In()
 		w.Line("%s", fail)
 		w.Out()

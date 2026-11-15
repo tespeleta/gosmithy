@@ -23,13 +23,32 @@ func TestFiles(t *testing.T) {
 	if !ok {
 		t.Fatalf("runtime files = %v, want internal/smithy/json.go", files)
 	}
-	for _, want := range []string{"func FormatTimestamp", "func ParseTimestamp", "func MarshalBigDecimal", "TimestampEpochMilliseconds"} {
+	for _, want := range []string{"func FormatTimestamp", "func ParseTimestamp", "TimestampEpochMilliseconds"} {
 		if !bytes.Contains(jsonContent, []byte(want)) {
 			t.Errorf("json runtime source missing %q", want)
 		}
 	}
 	if _, ok := files["internal/smithy/http.go"]; ok {
 		t.Error("model-only runtime must not include the HTTP protocol helpers")
+	}
+	if _, ok := files["internal/smithy/relaxed.go"]; ok {
+		t.Error("model-only runtime must not include the relaxed numeric helpers by default")
+	}
+}
+
+func TestRelaxedFiles(t *testing.T) {
+	files, err := RelaxedFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, ok := files["internal/smithy/relaxed.go"]
+	if !ok {
+		t.Fatalf("relaxed files = %v, want internal/smithy/relaxed.go", files)
+	}
+	for _, want := range []string{"func UnmarshalRelaxedInt8", "func UnmarshalRelaxedFloat64", "func UnmarshalRelaxedBigInteger"} {
+		if !bytes.Contains(content, []byte(want)) {
+			t.Errorf("relaxed runtime source missing %q", want)
+		}
 	}
 }
 

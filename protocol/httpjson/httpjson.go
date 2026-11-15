@@ -1,5 +1,5 @@
 // Package httpjson defines gosmithy.protocols#httpJson, the generic HTTP+JSON
-// protocol implemented by gosmithy.
+// protocol implemented by gosmithy, and its optional relaxedInput extension.
 //
 // The protocol is defined in Smithy IDL and embedded in the binary so that the
 // generator can load it when the protocol is selected. It deliberately depends
@@ -21,6 +21,13 @@ const TraitID = "gosmithy.protocols#httpJson"
 
 // ID is the parsed protocol trait shape ID.
 var ID = model.MustShapeID(TraitID)
+
+// RelaxedInputTrait is the shape ID of the gosmithy trait that relaxes JSON
+// input decoding for a service or a member.
+const RelaxedInputTraitID = "gosmithy.protocols#relaxedInput"
+
+// RelaxedInputTrait is the parsed relaxed-input trait shape ID.
+var RelaxedInputTrait = model.MustShapeID(RelaxedInputTraitID)
 
 // DefinitionFile is the synthetic filename of the embedded protocol model.
 const DefinitionFile = "gosmithy.protocols.smithy"
@@ -44,11 +51,26 @@ namespace gosmithy.protocols
         httpResponseCode
         jsonName
         mediaType
+        relaxedInput
         timestampFormat
     ]
 )
 @trait(selector: "service")
 structure httpJson {}
+
+/// Relaxes JSON input decoding for a service or a member. When enabled, a
+/// Boolean or numeric member also accepts a quoted string, and a bigDecimal
+/// member also accepts a quoted decimal string.
+///
+/// The trait may be applied to a service (the default for that service's
+/// operation inputs) or to a scalar member (an override). A member trait wins
+/// over the service trait.
+@trait(selector: "service, member")
+structure relaxedInput {
+    /// Whether relaxed decoding is enabled. Defaults to true when the trait
+    /// is applied.
+    enabled: Boolean = true
+}
 `
 
 // Definition parses and returns the embedded protocol model.

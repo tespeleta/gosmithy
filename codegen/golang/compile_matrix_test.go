@@ -31,6 +31,20 @@ var matrixCases = []struct {
 }`, matrixOpInput),
 	},
 	{
+		name: "query_big_decimal_control",
+		source: matrixModel(`structure In {
+    @httpQuery("d")
+    d: BigDecimal
+}`, matrixOpInput),
+	},
+	{
+		name: "header_big_decimal_control",
+		source: matrixModel(`structure In {
+    @httpHeader("X-D")
+    d: BigDecimal
+}`, matrixOpInput),
+	},
+	{
 		name: "body_union_control",
 		source: matrixModel(`union U {
     name: String

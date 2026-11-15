@@ -86,33 +86,72 @@ func (g *generator) emitMemberValidation(w *fileWriter, container *model.Shape, 
 	path := quoted(member.ID.Member)
 	required := member.Required()
 	valueChecks := g.memberValueChecks(member, target)
+	hasNilPresence := g.fieldHasNilPresence(member, target)
 
 	if required && !valueChecks {
-		w.Line("if %s == nil {", field)
-		w.In()
-		w.Line("errs.Add(%s, %s)", path, quoted("is required"))
-		w.Out()
-		w.Line("}")
+		if hasNilPresence {
+			w.Line("if %s == nil {", field)
+			w.In()
+			w.Line("errs.Add(%s, %s)", path, quoted("is required"))
+			w.Out()
+			w.Line("}")
+		}
 		return nil
 	}
 	if !required && !valueChecks {
 		return nil
 	}
 
-	if required {
+	opened := true
+	switch {
+	case required && hasNilPresence:
 		w.Line("if %s == nil {", field)
 		w.In()
 		w.Line("errs.Add(%s, %s)", path, quoted("is required"))
 		w.Out()
 		w.Line("} else {")
-	} else {
+	case required:
+		// Required plain scalar: no presence check is possible.
+		opened = false
+	case g.optionalFor(member, target):
+		w.Line("if %s.HasValue() {", field)
+	case hasNilPresence:
 		w.Line("if %s != nil {", field)
+	default:
+		return nil
 	}
-	w.In()
+	if opened {
+		w.In()
+	}
 	err := g.emitMemberValue(w, member, target, field, path)
-	w.Out()
-	w.Line("}")
+	if opened {
+		w.Out()
+		w.Line("}")
+	}
 	return err
+}
+
+// fieldHasNilPresence reports whether field is a pointer or nilable value that
+// can be compared with nil. Required plain scalars and Optional wrappers are
+// not nil-checkable.
+func (g *generator) fieldHasNilPresence(member, target *model.Shape) bool {
+	if g.optionalFor(member, target) || g.fieldIsPlainValue(member, target) {
+		return false
+	}
+	return true
+}
+
+func (g *generator) fieldValueExpr(member, target *model.Shape, field string) string {
+	switch {
+	case g.optionalFor(member, target):
+		return field + ".MustValue()"
+	case g.fieldIsPlainValue(member, target):
+		return field
+	case fieldHasPointerWrapper(target):
+		return "*" + field
+	default:
+		return field
+	}
 }
 
 // memberValueChecks reports whether emitMemberValue will emit anything for a
@@ -164,10 +203,7 @@ func (g *generator) emitMemberValue(w *fileWriter, member, target *model.Shape, 
 	if !c.hasApplicable(target) {
 		return nil
 	}
-	valueExpr := expr
-	if fieldHasPointerWrapper(target) {
-		valueExpr = "*" + expr
-	}
+	valueExpr := g.fieldValueExpr(member, target, expr)
 	return g.emitConstraintChecks(w, target, c, valueExpr, path)
 }
 

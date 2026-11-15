@@ -2,7 +2,7 @@
 
 // Package types contains Go data types and validators generated from the Smithy service example.library#Library.
 //
-// Member presence is represented by pointers or nil slices/maps. Requiredness and constraints are enforced by the Validate methods; callers should not build cyclic values.
+// Member presence is represented by Optional, pointers, or nil slices/maps. Constraints are enforced by the Validate methods; callers should not build cyclic values. Required plain scalars are not presence-checked.
 //
 // Known limitations: @default and @clientOptional are not applied, @length counts Unicode code points for strings and bytes for blobs, @pattern uses Go's RE2 regular expressions rather than ECMAScript, and @range on bigInteger/bigDecimal is not generated.
 package types

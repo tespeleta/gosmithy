@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/tespeleta/gosmithy/codegen"
@@ -16,6 +17,17 @@ import (
 	"github.com/tespeleta/gosmithy/protocol/httpjson"
 	"github.com/tespeleta/gosmithy/validation"
 )
+
+// flagWasSet reports whether name was provided explicitly on the command line.
+func flagWasSet(fs *flag.FlagSet, name string) bool {
+	set := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			set = true
+		}
+	})
+	return set
+}
 
 // optionFlags collects repeatable --opt key=value flags.
 type optionFlags []string
@@ -51,6 +63,7 @@ func runGenerate(args []string) error {
 	fs.Var(&generatorNames, "generator", "generator namespace or namespace:option (repeatable/comma-separated; default all)")
 	service := fs.String("service", "", "service shape ID to generate")
 	module := fs.String("module", "", "Go module path for the generated module")
+	useOptionals := fs.Bool("useOptionals", true, "generate Optional[T] for non-required scalar members (Go only)")
 	out := fs.String("out", "", "output directory")
 	clean := fs.Bool("clean", false, "remove the output directory before writing")
 	list := fs.Bool("list-generators", false, "list registered generators and exit")
@@ -119,6 +132,13 @@ func runGenerate(args []string) error {
 			return fmt.Errorf("--module %q conflicts with --opt module=%q", *module, existing)
 		}
 		options["module"] = *module
+	}
+	if flagWasSet(fs, "useOptionals") {
+		optionalValue := strconv.FormatBool(*useOptionals)
+		if existing, ok := options["useOptionals"]; ok && existing != optionalValue {
+			return fmt.Errorf("--useOptionals=%s conflicts with --opt useOptionals=%s", optionalValue, existing)
+		}
+		options["useOptionals"] = optionalValue
 	}
 
 	files, err := parseFiles(fs.Args())

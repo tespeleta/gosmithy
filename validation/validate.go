@@ -36,6 +36,11 @@ const (
 	SyntacticShapeIdTarget   = "SyntacticShapeIdTarget"
 )
 
+// relaxedInputTrait is the gosmithy.protocols#relaxedInput trait ID. The
+// protocol package owns the definition; validation only needs the ID for the
+// target checks gosmithy adds on top of the trait's selector.
+var relaxedInputTrait = model.MustShapeID("gosmithy.protocols#relaxedInput")
+
 // Validate runs every structural validator over the model and returns all
 // events, including diagnostics produced during assembly, sorted
 // deterministically by source location.
@@ -51,6 +56,7 @@ func Validate(m *model.Model) []Event {
 	events = append(events, validateJSONNames(m)...)
 	events = append(events, validateTraitConstraints(m)...)
 	events = append(events, validateTraitTargets(m)...)
+	events = append(events, validateRelaxedInputTargets(m)...)
 	events = append(events, validateSyntheticShapes(m)...)
 	events = append(events, validateSyntacticShapeIDs(m)...)
 	model.SortDiagnostics(events)
@@ -925,6 +931,51 @@ func enumValues(m *model.Model, enum *model.Shape) map[string]bool {
 		}
 	}
 	return out
+}
+
+// validateRelaxedInputTargets checks the targets of the gosmithy relaxed-input
+// trait. Smithy selectors are not generally enforced, so this validator adds
+// the checks the Go generator relies on: the trait applies to a service or to
+// a scalar member of a structure or union.
+func validateRelaxedInputTargets(m *model.Model) []Event {
+	var events []Event
+	for _, s := range m.Shapes() {
+		if !s.HasTrait(relaxedInputTrait) {
+			continue
+		}
+		if s.Type == model.TypeService {
+			continue
+		}
+		if !s.IsMember() {
+			events = append(events, makeEvent(ModelInvalidTraitTarget, s.Source, s.ID,
+				"Trait `%s` can only be applied to a service or a member", relaxedInputTrait))
+			continue
+		}
+		container, ok := m.Shape(s.Container)
+		if !ok || (container.Type != model.TypeStructure && container.Type != model.TypeUnion) {
+			events = append(events, makeEvent(ModelInvalidTraitTarget, s.Source, s.ID,
+				"Trait `%s` can only be applied to structure or union members", relaxedInputTrait))
+			continue
+		}
+		target, ok := m.Shape(s.Target)
+		if !ok || !isRelaxableScalar(target.Type) {
+			events = append(events, makeEvent(ModelInvalidTraitTarget, s.Source, s.ID,
+				"Trait `%s` can only be applied to boolean, numeric, or bigDecimal members", relaxedInputTrait))
+		}
+	}
+	return events
+}
+
+func isRelaxableScalar(t model.ShapeType) bool {
+	switch t {
+	case model.TypeBoolean,
+		model.TypeByte, model.TypeShort, model.TypeInteger, model.TypeLong,
+		model.TypeFloat, model.TypeDouble,
+		model.TypeBigInteger, model.TypeBigDecimal:
+		return true
+	default:
+		return false
+	}
 }
 
 func validateTraitTargets(m *model.Model) []Event {
