@@ -239,10 +239,10 @@ func (v Scores) validateContents(errs *smithy.ValidationErrors, prefix string) {
 	for i := range v {
 		elem := v[i]
 		path := fmt.Sprintf("%s[%d]", prefix, i)
-		if elem < 0 {
+		if int64(elem) < 0 {
 			errs.Add(path, "must be greater than or equal to 0")
 		}
-		if elem > 10 {
+		if int64(elem) > 10 {
 			errs.Add(path, "must be less than or equal to 10")
 		}
 	}
@@ -313,10 +313,10 @@ func (v *Thing) Validate() error {
 		}
 	}
 	if v.Percentage != nil {
-		if *v.Percentage < 1 {
+		if int64(*v.Percentage) < 1 {
 			errs.Add("percentage", "must be greater than or equal to 1")
 		}
-		if *v.Percentage > 100 {
+		if int64(*v.Percentage) > 100 {
 			errs.Add("percentage", "must be less than or equal to 100")
 		}
 	}

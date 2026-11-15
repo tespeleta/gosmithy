@@ -535,10 +535,9 @@ func (g *generator) emitClientQuery(w *fileWriter, bundle *httpbinding.Binding) 
 			if !ok {
 				continue
 			}
-			_ = elem
 			w.Line("for _, elem := range %s {", field)
 			w.In()
-			w.Line("query.Add(%s, %s)", quoted(name), g.formatValueExpr(w, member, elemTarget, "elem"))
+			w.Line("query.Add(%s, %s)", quoted(name), g.formatValueExpr(w, elem, elemTarget, "elem"))
 			w.Out()
 			w.Line("}")
 			continue
@@ -557,25 +556,31 @@ func (g *generator) emitClientQuery(w *fileWriter, bundle *httpbinding.Binding) 
 		member, target, ok := g.memberAndTarget(bundle.Input.QueryParams)
 		if ok {
 			field := "input." + g.fieldName(member)
-			if valueMember, valueTarget, ok := g.mapValue(target); ok && (valueTarget.Type == model.TypeList || valueTarget.Type == model.TypeSet) {
-				_ = valueMember
-				w.Line("for key, values := range %s {", field)
-				w.In()
-				emitBoundQuerySkip(w, names)
-				w.Line("for _, value := range values {")
-				w.In()
-				w.Line("query.Add(key, value)")
-				w.Out()
-				w.Line("}")
-				w.Out()
-				w.Line("}")
-			} else {
-				w.Line("for key, value := range %s {", field)
-				w.In()
-				emitBoundQuerySkip(w, names)
-				w.Line("query.Add(key, value)")
-				w.Out()
-				w.Line("}")
+			if valueMember, valueTarget, ok := g.mapValue(target); ok {
+				if valueTarget.Type == model.TypeList || valueTarget.Type == model.TypeSet {
+					expr := "value"
+					if listMember, elemTarget, ok := g.collectionElement(valueTarget); ok {
+						expr = g.formatValueExpr(w, listMember, elemTarget, "value")
+					}
+					w.Line("for key, values := range %s {", field)
+					w.In()
+					emitBoundQuerySkip(w, names)
+					w.Line("for _, value := range values {")
+					w.In()
+					w.Line("query.Add(key, %s)", expr)
+					w.Out()
+					w.Line("}")
+					w.Out()
+					w.Line("}")
+				} else {
+					expr := g.formatValueExpr(w, valueMember, valueTarget, "value")
+					w.Line("for key, value := range %s {", field)
+					w.In()
+					emitBoundQuerySkip(w, names)
+					w.Line("query.Add(key, %s)", expr)
+					w.Out()
+					w.Line("}")
+				}
 			}
 		}
 	}
@@ -605,10 +610,21 @@ func (g *generator) emitClientBody(w *fileWriter, bundle *httpbinding.Binding, n
 			if fieldHasPointerWrapper(target) {
 				expr = "*" + field
 			}
-			if target.Type == model.TypeBigDecimal {
+			switch target.Type {
+			case model.TypeBigDecimal:
 				w.AddImport(g.module+"/internal/smithy", "")
 				w.Line("payload, err := smithy.MarshalBigDecimal(%s)", expr)
-			} else {
+			case model.TypeTimestamp:
+				w.AddImport(g.module+"/internal/smithy", "")
+				format := g.timestampFormatFor(member, target)
+				w.Line("formatted, err := smithy.FormatTimestamp(%s, %s)", expr, quoted(format))
+				w.Line("if err != nil {")
+				w.In()
+				w.Line("return nil, fmt.Errorf(%s, err)", quoted(name+": encoding request payload: %w"))
+				w.Out()
+				w.Line("}")
+				w.Line("payload, err := json.Marshal(formatted)")
+			default:
 				w.Line("payload, err := json.Marshal(%s)", expr)
 			}
 			w.Line("if err != nil {")
@@ -649,7 +665,7 @@ func (g *generator) emitClientHeaders(w *fileWriter, bundle *httpbinding.Binding
 		}
 		field := "input." + g.fieldName(member)
 		if target.Type == model.TypeList || target.Type == model.TypeSet {
-			_, elemTarget, ok := g.collectionElement(target)
+			elem, elemTarget, ok := g.collectionElement(target)
 			if !ok {
 				continue
 			}
@@ -659,7 +675,7 @@ func (g *generator) emitClientHeaders(w *fileWriter, bundle *httpbinding.Binding
 			w.Line("values := make([]string, len(%s))", field)
 			w.Line("for i, elem := range %s {", field)
 			w.In()
-			w.Line("values[i] = %s", g.formatValueExpr(w, member, elemTarget, "elem"))
+			w.Line("values[i] = %s", g.formatValueExpr(w, elem, elemTarget, "elem"))
 			w.Out()
 			w.Line("}")
 			w.Line("request.Header.Set(%s, strings.Join(values, \", \"))", quoted(name))
@@ -678,16 +694,20 @@ func (g *generator) emitClientHeaders(w *fileWriter, bundle *httpbinding.Binding
 		w.Line("}")
 	}
 	if !bundle.Input.PrefixHeaders.IsZero() {
-		member, _, ok := g.memberAndTarget(bundle.Input.PrefixHeaders)
+		member, target, ok := g.memberAndTarget(bundle.Input.PrefixHeaders)
 		if ok {
 			field := "input." + g.fieldName(member)
 			prefix := bundle.Input.PrefixHeader
+			expr := "value"
+			if valueMember, valueTarget, ok := g.mapValue(target); ok {
+				expr = g.formatValueExpr(w, valueMember, valueTarget, "value")
+			}
 			w.Line("for key, value := range %s {", field)
 			w.In()
 			if prefix != "" {
-				w.Line("request.Header.Set(%s+key, value)", quoted(prefix))
+				w.Line("request.Header.Set(%s+key, %s)", quoted(prefix), expr)
 			} else {
-				w.Line("request.Header.Set(key, value)")
+				w.Line("request.Header.Set(key, %s)", expr)
 			}
 			w.Out()
 			w.Line("}")
@@ -704,7 +724,7 @@ func (g *generator) emitClientResponseHeaders(w *fileWriter, bundle *httpbinding
 		}
 		field := "output." + g.fieldName(member)
 		if target.Type == model.TypeList || target.Type == model.TypeSet {
-			_, elemTarget, ok := g.collectionElement(target)
+			elem, elemTarget, ok := g.collectionElement(target)
 			if !ok {
 				continue
 			}
@@ -718,7 +738,7 @@ func (g *generator) emitClientResponseHeaders(w *fileWriter, bundle *httpbinding
 			w.Line("for _, part := range parts {")
 			w.In()
 			w.Line("part = strings.TrimSpace(part)")
-			parsed := g.emitParseValue(w, member, elemTarget, "part", "response header "+name)
+			parsed := g.emitParseValue(w, elem, elemTarget, "part", "response header "+name)
 			w.Line("parsed = append(parsed, %s)", parsed)
 			w.Out()
 			w.Line("}")
@@ -759,7 +779,11 @@ func (g *generator) emitClientResponseHeaders(w *fileWriter, bundle *httpbinding
 			w.Line("%s = make(%s)", field, mapType)
 			w.Out()
 			w.Line("}")
-			w.Line("%s[strings.ToLower(key[len(%s):])] = values[0]", field, quoted(prefix))
+			expr := "values[0]"
+			if _, valueTarget, ok := g.mapValue(target); ok {
+				expr = g.httpStringToType(valueTarget, expr)
+			}
+			w.Line("%s[strings.ToLower(key[len(%s):])] = %s", field, quoted(prefix), expr)
 			w.Out()
 			w.Line("}")
 			w.Out()
@@ -813,6 +837,45 @@ func (g *generator) emitClientResponsePayload(w *fileWriter, bundle *httpbinding
 		w.Line("if len(responseBody) > 0 {")
 		w.In()
 		w.Line("value, err := smithy.UnmarshalBigDecimal(responseBody, 256)")
+		w.Line("if err != nil {")
+		w.In()
+		w.Line("return nil, fmt.Errorf(%s, err)", quoted(name+": decoding response payload: %w"))
+		w.Out()
+		w.Line("}")
+		w.Line("%s = value", field)
+		w.Out()
+		w.Line("}")
+	case model.TypeTimestamp:
+		w.AddImport("encoding/json", "")
+		w.AddImport(g.module+"/internal/smithy", "")
+		format := g.timestampFormatFor(member, target)
+		w.Line("if len(responseBody) > 0 {")
+		w.In()
+		w.Line("var text string")
+		w.Line("if err := json.Unmarshal(responseBody, &text); err != nil {")
+		w.In()
+		w.Line("return nil, fmt.Errorf(%s, err)", quoted(name+": decoding response payload: %w"))
+		w.Out()
+		w.Line("}")
+		w.Line("value, err := smithy.ParseTimestamp(text, %s)", quoted(format))
+		w.Line("if err != nil {")
+		w.In()
+		w.Line("return nil, fmt.Errorf(%s, err)", quoted(name+": decoding response payload: %w"))
+		w.Out()
+		w.Line("}")
+		w.Line("%s = &value", field)
+		w.Out()
+		w.Line("}")
+	case model.TypeUnion:
+		union, ok := g.typeName(target)
+		if !ok {
+			g.diagnosticAt(validation.Danger, target.Source,
+				"Union `%s` has no generated Go type for a response payload", target.ID)
+			return nil
+		}
+		w.Line("if len(responseBody) > 0 {")
+		w.In()
+		w.Line("value, err := types.Unmarshal%s(responseBody)", union)
 		w.Line("if err != nil {")
 		w.In()
 		w.Line("return nil, fmt.Errorf(%s, err)", quoted(name+": decoding response payload: %w"))
@@ -1362,6 +1425,45 @@ func (g *generator) emitServerDecode(w *fileWriter, bundle *httpbinding.Binding,
 				w.Line("%s = value", field)
 				w.Out()
 				w.Line("}")
+			case model.TypeTimestamp:
+				w.AddImport("encoding/json", "")
+				w.AddImport(g.module+"/internal/smithy", "")
+				format := g.timestampFormatFor(member, target)
+				w.Line("if len(body) > 0 {")
+				w.In()
+				w.Line("var text string")
+				w.Line("if err := json.Unmarshal(body, &text); err != nil {")
+				w.In()
+				w.Line("return nil, fmt.Errorf(\"decoding request payload: %%w\", err)")
+				w.Out()
+				w.Line("}")
+				w.Line("value, err := smithy.ParseTimestamp(text, %s)", quoted(format))
+				w.Line("if err != nil {")
+				w.In()
+				w.Line("return nil, fmt.Errorf(\"decoding request payload: %%w\", err)")
+				w.Out()
+				w.Line("}")
+				w.Line("%s = &value", field)
+				w.Out()
+				w.Line("}")
+			case model.TypeUnion:
+				union, ok := g.typeName(target)
+				if !ok {
+					g.diagnosticAt(validation.Danger, target.Source,
+						"Union `%s` has no generated Go type for a request payload", target.ID)
+					return nil
+				}
+				w.Line("if len(body) > 0 {")
+				w.In()
+				w.Line("value, err := types.Unmarshal%s(body)", union)
+				w.Line("if err != nil {")
+				w.In()
+				w.Line("return nil, fmt.Errorf(\"decoding request payload: %%w\", err)")
+				w.Out()
+				w.Line("}")
+				w.Line("%s = value", field)
+				w.Out()
+				w.Line("}")
 			default:
 				w.AddImport("encoding/json", "")
 				w.Line("if len(body) > 0 {")
@@ -1429,7 +1531,7 @@ func (g *generator) emitServerDecode(w *fileWriter, bundle *httpbinding.Binding,
 		w.Line("if values, ok := query[%s]; ok && len(values) > 0 {", quoted(queryName))
 		w.In()
 		if target.Type == model.TypeList || target.Type == model.TypeSet {
-			_, elemTarget, ok := g.collectionElement(target)
+			elem, elemTarget, ok := g.collectionElement(target)
 			if !ok {
 				w.Out()
 				w.Line("}")
@@ -1440,7 +1542,7 @@ func (g *generator) emitServerDecode(w *fileWriter, bundle *httpbinding.Binding,
 			w.Line("%s := make(%s, 0, len(values))", parsedList, listType)
 			w.Line("for _, value := range values {")
 			w.In()
-			parsed := g.emitParseValue(w, member, elemTarget, "value", "query parameter "+queryName)
+			parsed := g.emitParseValue(w, elem, elemTarget, "value", "query parameter "+queryName)
 			w.Line("%s = append(%s, %s)", parsedList, parsedList, parsed)
 			w.Out()
 			w.Line("}")
@@ -1457,20 +1559,36 @@ func (g *generator) emitServerDecode(w *fileWriter, bundle *httpbinding.Binding,
 		if ok {
 			field := "input." + g.fieldName(member)
 			mapType := g.qualifiedTypeName(target)
-			if _, valueTarget, ok := g.mapValue(target); ok && (valueTarget.Type == model.TypeList || valueTarget.Type == model.TypeSet) {
+			_, valueTarget, ok := g.mapValue(target)
+			if !ok {
+				return nil
+			}
+			if valueTarget.Type == model.TypeList || valueTarget.Type == model.TypeSet {
 				listType := g.qualifiedTypeName(valueTarget)
+				expr := "value"
+				if _, elemTarget, ok := g.collectionElement(valueTarget); ok {
+					expr = g.httpStringToType(elemTarget, "value")
+				}
+				parsed := g.nextLocal("parsedValues")
 				w.Line("if len(query) > 0 {")
 				w.In()
 				w.Line("%s = make(%s, len(query))", field, mapType)
 				w.Line("for key, values := range query {")
 				w.In()
 				emitBoundQuerySkip(w, names)
-				w.Line("%s[key] = %s(values)", field, listType)
+				w.Line("%s := make(%s, 0, len(values))", parsed, listType)
+				w.Line("for _, value := range values {")
+				w.In()
+				w.Line("%s = append(%s, %s)", parsed, parsed, expr)
+				w.Out()
+				w.Line("}")
+				w.Line("%s[key] = %s", field, parsed)
 				w.Out()
 				w.Line("}")
 				w.Out()
 				w.Line("}")
 			} else {
+				expr := g.httpStringToType(valueTarget, "values[0]")
 				w.Line("if len(query) > 0 {")
 				w.In()
 				w.Line("%s = make(%s, len(query))", field, mapType)
@@ -1479,7 +1597,7 @@ func (g *generator) emitServerDecode(w *fileWriter, bundle *httpbinding.Binding,
 				emitBoundQuerySkip(w, names)
 				w.Line("if len(values) > 0 {")
 				w.In()
-				w.Line("%s[key] = values[0]", field)
+				w.Line("%s[key] = %s", field, expr)
 				w.Out()
 				w.Line("}")
 				w.Out()
@@ -1499,7 +1617,7 @@ func (g *generator) emitServerDecode(w *fileWriter, bundle *httpbinding.Binding,
 		w.Line("if values := r.Header.Values(%s); len(values) > 0 {", quoted(headerName))
 		w.In()
 		if target.Type == model.TypeList || target.Type == model.TypeSet {
-			_, elemTarget, ok := g.collectionElement(target)
+			elem, elemTarget, ok := g.collectionElement(target)
 			if !ok {
 				w.Out()
 				w.Line("}")
@@ -1518,7 +1636,7 @@ func (g *generator) emitServerDecode(w *fileWriter, bundle *httpbinding.Binding,
 			w.Line("continue")
 			w.Out()
 			w.Line("}")
-			parsed := g.emitParseValue(w, member, elemTarget, "part", "header "+headerName)
+			parsed := g.emitParseValue(w, elem, elemTarget, "part", "header "+headerName)
 			w.Line("%s = append(%s, %s)", parsedList, parsedList, parsed)
 			w.Out()
 			w.Line("}")
@@ -1550,7 +1668,11 @@ func (g *generator) emitServerDecode(w *fileWriter, bundle *httpbinding.Binding,
 			w.Line("%s = make(%s)", field, mapType)
 			w.Out()
 			w.Line("}")
-			w.Line("%s[strings.ToLower(key[len(%s):])] = values[0]", field, quoted(prefix))
+			expr := "values[0]"
+			if _, valueTarget, ok := g.mapValue(target); ok {
+				expr = g.httpStringToType(valueTarget, expr)
+			}
+			w.Line("%s[strings.ToLower(key[len(%s):])] = %s", field, quoted(prefix), expr)
 			w.Out()
 			w.Line("}")
 			w.Out()
@@ -1573,7 +1695,7 @@ func (g *generator) emitServerHeaders(w *fileWriter, bundle *httpbinding.Binding
 		}
 		field := "output." + g.fieldName(member)
 		if target.Type == model.TypeList || target.Type == model.TypeSet {
-			_, elemTarget, ok := g.collectionElement(target)
+			elem, elemTarget, ok := g.collectionElement(target)
 			if !ok {
 				continue
 			}
@@ -1583,7 +1705,7 @@ func (g *generator) emitServerHeaders(w *fileWriter, bundle *httpbinding.Binding
 			w.Line("values := make([]string, len(%s))", field)
 			w.Line("for i, elem := range %s {", field)
 			w.In()
-			w.Line("values[i] = %s", g.formatValueExpr(w, member, elemTarget, "elem"))
+			w.Line("values[i] = %s", g.formatValueExpr(w, elem, elemTarget, "elem"))
 			w.Out()
 			w.Line("}")
 			w.Line("w.Header().Set(%s, strings.Join(values, \", \"))", quoted(headerName))
@@ -1602,16 +1724,20 @@ func (g *generator) emitServerHeaders(w *fileWriter, bundle *httpbinding.Binding
 		w.Line("}")
 	}
 	if !bundle.Output.PrefixHeaders.IsZero() {
-		member, _, ok := g.memberAndTarget(bundle.Output.PrefixHeaders)
+		member, target, ok := g.memberAndTarget(bundle.Output.PrefixHeaders)
 		if ok {
 			field := "output." + g.fieldName(member)
 			prefix := bundle.Output.PrefixHeader
+			expr := "value"
+			if valueMember, valueTarget, ok := g.mapValue(target); ok {
+				expr = g.formatValueExpr(w, valueMember, valueTarget, "value")
+			}
 			w.Line("for key, value := range %s {", field)
 			w.In()
 			if prefix != "" {
-				w.Line("w.Header().Set(%s+key, value)", quoted(prefix))
+				w.Line("w.Header().Set(%s+key, %s)", quoted(prefix), expr)
 			} else {
-				w.Line("w.Header().Set(key, value)")
+				w.Line("w.Header().Set(key, %s)", expr)
 			}
 			w.Out()
 			w.Line("}")
@@ -1642,10 +1768,23 @@ func (g *generator) emitServerResponsePayload(w *fileWriter, bundle *httpbinding
 				if fieldHasPointerWrapper(target) {
 					expr = "*" + field
 				}
-				if target.Type == model.TypeBigDecimal {
+				switch target.Type {
+				case model.TypeBigDecimal:
 					w.AddImport(g.module+"/internal/smithy", "")
 					w.Line("data, err := smithy.MarshalBigDecimal(%s)", expr)
-				} else {
+				case model.TypeTimestamp:
+					w.AddImport(g.module+"/internal/smithy", "")
+					format := g.timestampFormatFor(member, target)
+					w.Line("formatted, err := smithy.FormatTimestamp(%s, %s)", expr, quoted(format))
+					w.Line("if err != nil {")
+					w.In()
+					w.Line("s.logError(err)")
+					w.Line("writeProtocolError(w, http.StatusInternalServerError, \"InternalFailure\", \"internal server error\")")
+					w.Line("return")
+					w.Out()
+					w.Line("}")
+					w.Line("data, err := json.Marshal(formatted)")
+				default:
 					w.Line("data, err := json.Marshal(%s)", expr)
 				}
 				w.Line("if err != nil {")
@@ -1875,6 +2014,26 @@ func (g *generator) formatValueExpr(w *fileWriter, member, target *model.Shape, 
 		return "formatTimestamp(" + expr + ", " + quoted(format) + ")"
 	default:
 		return "fmt.Sprint(" + expr + ")"
+	}
+}
+
+// httpStringToType converts a Go string expression (an HTTP query or header
+// value) into the target's Go representation. It is the inverse of
+// formatValueExpr for the string-like targets that HTTP map bindings allow.
+func (g *generator) httpStringToType(target *model.Shape, expr string) string {
+	if target == nil {
+		return expr
+	}
+	switch target.Type {
+	case model.TypeString:
+		if g.hasNamedType(target) {
+			return g.qualifiedTypeName(target) + "(" + expr + ")"
+		}
+		return expr
+	case model.TypeEnum:
+		return g.qualifiedTypeName(target) + "(" + expr + ")"
+	default:
+		return expr
 	}
 }
 

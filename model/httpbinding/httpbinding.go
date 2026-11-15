@@ -398,6 +398,9 @@ func bindMessage(m *model.Model, op, shape *model.Shape, input bool, diagnostics
 			if input {
 				diagnostics = append(diagnostics, diagnostic(EventInvalidResponse, member.Source, member.ID,
 					"@httpResponseCode is only valid on operation output members, but `%s` is an input member", member.ID))
+			} else if !bindings.ResponseCode.IsZero() {
+				diagnostics = append(diagnostics, diagnostic(EventDuplicateBinding, member.Source, member.ID,
+					"Only one member may use @httpResponseCode, but `%s` is already bound as the response code", bindings.ResponseCode))
 			} else {
 				bindings.ResponseCode = member.ID
 				if err := checkResponseCodeTarget(m, member); err != "" {
@@ -422,6 +425,7 @@ func bindMessage(m *model.Model, op, shape *model.Shape, input bool, diagnostics
 
 func buildErrors(m *model.Model, service, op *model.Shape, diagnostics *[]model.Diagnostic) []ErrorBinding {
 	var out []ErrorBinding
+	seenCodes := make(map[string]model.ShapeID)
 	for _, id := range m.ServiceOperationErrors(service.ID, op.ID) {
 		shape, ok := m.Shape(id)
 		if !ok {
@@ -434,6 +438,13 @@ func buildErrors(m *model.Model, service, op *model.Shape, diagnostics *[]model.
 				"Error `%s` of operation `%s` must be a structure with the @error trait", shape.ID, op.ID))
 			continue
 		}
+		wireCode := shape.ID.Name
+		if previous, exists := seenCodes[wireCode]; exists && previous != shape.ID {
+			*diagnostics = append(*diagnostics, diagnostic(EventInvalidError, op.Source, op.ID,
+				"Operation `%s` has errors `%s` and `%s` with the same wire code `%s`", op.ID, previous, shape.ID, wireCode))
+			continue
+		}
+		seenCodes[wireCode] = shape.ID
 		fault, _ := shape.ErrorType()
 		status := 400
 		if fault == "server" {
@@ -458,6 +469,9 @@ func buildErrors(m *model.Model, service, op *model.Shape, diagnostics *[]model.
 func parseURI(raw string) ([]Segment, error) {
 	if !strings.HasPrefix(raw, "/") {
 		return nil, fmt.Errorf("the URI must start with '/'")
+	}
+	if strings.ContainsRune(raw, '?') {
+		return nil, fmt.Errorf("literal query parameters are not supported by the httpJson protocol")
 	}
 	path := strings.TrimPrefix(raw, "/")
 	if path == "" {
@@ -574,6 +588,9 @@ func checkQueryTarget(m *model.Model, member *model.Shape) string {
 		return reason
 	}
 	if target.Type == model.TypeList || target.Type == model.TypeSet {
+		if target.IsSparse() {
+			return fmt.Sprintf("targets `%s`, but @httpQuery does not support @sparse collections", target.ID)
+		}
 		elem, ok := target.GetMember("member")
 		if !ok {
 			return "targets a collection without a member"
@@ -603,6 +620,9 @@ func checkHeaderTarget(m *model.Model, member *model.Shape) string {
 		return reason
 	}
 	if target.Type == model.TypeList || target.Type == model.TypeSet {
+		if target.IsSparse() {
+			return fmt.Sprintf("targets `%s`, but @httpHeader does not support @sparse collections", target.ID)
+		}
 		elem, ok := target.GetMember("member")
 		if !ok {
 			return "targets a collection without a member"
@@ -630,6 +650,9 @@ func checkQueryParamsTarget(m *model.Model, member *model.Shape) string {
 	if target.Type != model.TypeMap {
 		return fmt.Sprintf("targets `%s`, but @httpQueryParams requires a map", target.ID)
 	}
+	if target.IsSparse() {
+		return fmt.Sprintf("targets `%s`, but @httpQueryParams does not support @sparse maps", target.ID)
+	}
 	key, ok := target.GetMember("key")
 	if !ok {
 		return "targets a map without a key member"
@@ -650,6 +673,9 @@ func checkQueryParamsTarget(m *model.Model, member *model.Shape) string {
 		return reason
 	}
 	if valueTarget.Type == model.TypeList || valueTarget.Type == model.TypeSet {
+		if valueTarget.IsSparse() {
+			return fmt.Sprintf("targets a map of @sparse collections `%s`, but @httpQueryParams does not support sparse list values", valueTarget.ID)
+		}
 		elem, ok := valueTarget.GetMember("member")
 		if !ok {
 			return "targets a map of collections without a member"
@@ -676,6 +702,9 @@ func checkPrefixHeadersTarget(m *model.Model, member *model.Shape) string {
 	}
 	if target.Type != model.TypeMap {
 		return fmt.Sprintf("targets `%s`, but @httpPrefixHeaders requires a map", target.ID)
+	}
+	if target.IsSparse() {
+		return fmt.Sprintf("targets `%s`, but @httpPrefixHeaders does not support @sparse maps", target.ID)
 	}
 	key, ok := target.GetMember("key")
 	if !ok {

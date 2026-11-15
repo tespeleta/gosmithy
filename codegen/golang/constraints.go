@@ -177,7 +177,9 @@ func rangeCondition(target *model.Shape, expr string, bound float64, min bool) (
 	switch target.Type {
 	case model.TypeByte, model.TypeShort, model.TypeInteger, model.TypeLong:
 		if isIntegral(bound) && bound >= math.MinInt64 && bound <= math.MaxInt64 {
-			return fmt.Sprintf("%s %s %d", expr, op, int64(bound)), nil
+			// Compare in int64 so a bound outside the Go type's range does not
+			// produce an overflow in the generated constant expression.
+			return fmt.Sprintf("int64(%s) %s %d", expr, op, int64(bound)), nil
 		}
 		literal, err := float64Literal(bound)
 		if err != nil {

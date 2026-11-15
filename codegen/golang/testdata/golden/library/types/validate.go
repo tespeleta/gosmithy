@@ -57,10 +57,10 @@ func (v *Book) Validate() error {
 		errs.AddNested("author", v.Author.Validate())
 	}
 	if v.Rating != nil {
-		if *v.Rating < 0 {
+		if int64(*v.Rating) < 0 {
 			errs.Add("rating", "must be greater than or equal to 0")
 		}
-		if *v.Rating > 100 {
+		if int64(*v.Rating) > 100 {
 			errs.Add("rating", "must be less than or equal to 100")
 		}
 	}
@@ -219,10 +219,10 @@ func (v *SearchInput) Validate() error {
 		errs.Add("query", "is required")
 	}
 	if v.MinRating != nil {
-		if *v.MinRating < 0 {
+		if int64(*v.MinRating) < 0 {
 			errs.Add("minRating", "must be greater than or equal to 0")
 		}
-		if *v.MinRating > 100 {
+		if int64(*v.MinRating) > 100 {
 			errs.Add("minRating", "must be less than or equal to 100")
 		}
 	}

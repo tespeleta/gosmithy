@@ -2,8 +2,12 @@ package validation
 
 import (
 	"fmt"
+	"math"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/tespeleta/gosmithy/idl"
 	"github.com/tespeleta/gosmithy/model"
@@ -43,6 +47,9 @@ func Validate(m *model.Model) []Event {
 	events = append(events, validateMixins(m)...)
 	events = append(events, validateEnums(m)...)
 	events = append(events, validateTraitValues(m)...)
+	events = append(events, validateRangeBounds(m)...)
+	events = append(events, validateJSONNames(m)...)
+	events = append(events, validateTraitConstraints(m)...)
 	events = append(events, validateTraitTargets(m)...)
 	events = append(events, validateSyntacticShapeIDs(m)...)
 	model.SortDiagnostics(events)
@@ -87,18 +94,24 @@ func validateTargets(m *model.Model) []Event {
 					"Missing required member of shape `%s`: member", s.ID))
 			}
 		case model.TypeMap:
-			_, key := s.GetMember("key")
-			_, value := s.GetMember("value")
+			key, hasKey := s.GetMember("key")
+			_, hasValue := s.GetMember("value")
 			switch {
-			case !key && !value:
+			case !hasKey && !hasValue:
 				events = append(events, makeEvent(ModelInvalidMember, s.Source, s.ID,
 					"Missing required members of shape `%s`: key, value", s.ID))
-			case !key:
+			case !hasKey:
 				events = append(events, makeEvent(ModelInvalidMember, s.Source, s.ID,
 					"Missing required member of shape `%s`: key", s.ID))
-			case !value:
+			case !hasValue:
 				events = append(events, makeEvent(ModelInvalidMember, s.Source, s.ID,
 					"Missing required member of shape `%s`: value", s.ID))
+			}
+			if hasKey {
+				if target, ok := m.Shape(key.Target); ok && target.Type != model.TypeString && target.Type != model.TypeEnum {
+					events = append(events, makeEvent(ModelInvalidMemberTarget, key.Source, s.ID,
+						"Map key member `%s` targets `%s`, but map keys must target string shapes", key.ID, target.ID))
+				}
 			}
 		case model.TypeStructure, model.TypeUnion, model.TypeEnum, model.TypeIntEnum:
 			seen := make(map[string]*model.Shape)
@@ -301,6 +314,15 @@ func validateResourceProperty(m *model.Model, resource *model.Shape, kind, name 
 	if reason := illegalMemberTarget(target); reason != "" {
 		return []Event{makeEvent(ModelInvalidResource, resource.Source, resource.ID,
 			"Resource `%s` %s `%s` targets `%s`, which %s", resource.ID, kind, name, target.ID, reason)}
+	}
+	if kind == "identifier" {
+		switch target.Type {
+		case model.TypeString, model.TypeEnum:
+		default:
+			return []Event{makeEvent(ModelInvalidResource, resource.Source, resource.ID,
+				"Resource `%s` identifier `%s` targets `%s`, but resource identifiers must target a string or enum shape",
+				resource.ID, name, target.ID)}
+		}
 	}
 	return nil
 }
@@ -617,6 +639,288 @@ func checkTraitValue(m *model.Model, def *model.Shape, value model.Node, depth i
 	default:
 		return fmt.Sprintf("unsupported trait shape type %s", def.Type)
 	}
+}
+
+// validateTraitConstraints applies a trait definition's own @range, @length,
+// and @pattern constraints to the values supplied when the trait is applied.
+// This catches cases such as @http(code: 42), where the code member of the
+// http trait definition has @range(min: 100, max: 999).
+func validateTraitConstraints(m *model.Model) []Event {
+	var events []Event
+	for _, s := range m.Shapes() {
+		for _, traitID := range s.Traits.SortedIDs() {
+			trait := s.Traits[traitID]
+			def, ok := m.Shape(traitID)
+			if !ok || !def.IsTraitDefinition() {
+				continue
+			}
+			if msg := checkConstraintValue(m, def, trait.Value, ""); msg != "" {
+				events = append(events, makeEvent(ModelInvalidTraitValue, trait.Source, s.ID,
+					"Trait `%s` has an invalid value: %s", traitID, msg))
+			}
+		}
+	}
+	return events
+}
+
+func checkConstraintValue(m *model.Model, shape *model.Shape, value model.Node, path string) string {
+	if shape == nil || value.Kind == model.NodeNull {
+		return ""
+	}
+	if shape.IsMember() {
+		target, ok := m.Shape(shape.Target)
+		if !ok {
+			return ""
+		}
+		if msg := checkEffectiveConstraints(shape, target, value, path); msg != "" {
+			return msg
+		}
+		return walkConstraintValue(m, target, value, path, false)
+	}
+	if msg := checkShapeConstraints(shape, value, path); msg != "" {
+		return msg
+	}
+	return walkConstraintValue(m, shape, value, path, false)
+}
+
+func walkConstraintValue(m *model.Model, shape *model.Shape, value model.Node, path string, checkOwn bool) string {
+	if shape == nil {
+		return ""
+	}
+	if checkOwn {
+		if msg := checkShapeConstraints(shape, value, path); msg != "" {
+			return msg
+		}
+	}
+	switch shape.Type {
+	case model.TypeStructure, model.TypeUnion:
+		if value.Kind != model.NodeObject {
+			return ""
+		}
+		for _, entry := range value.Obj {
+			member, ok := shape.GetMember(entry.Key)
+			if !ok {
+				continue
+			}
+			if msg := checkConstraintValue(m, member, entry.Value, constraintPath(path, "member `"+entry.Key+"`")); msg != "" {
+				return msg
+			}
+		}
+	case model.TypeList, model.TypeSet:
+		if value.Kind != model.NodeArray {
+			return ""
+		}
+		member, ok := shape.GetMember("member")
+		if !ok {
+			return ""
+		}
+		for i, item := range value.Arr {
+			if msg := checkConstraintValue(m, member, item, constraintPath(path, fmt.Sprintf("element %d", i))); msg != "" {
+				return msg
+			}
+		}
+	case model.TypeMap:
+		if value.Kind != model.NodeObject {
+			return ""
+		}
+		member, ok := shape.GetMember("value")
+		if !ok {
+			return ""
+		}
+		for _, entry := range value.Obj {
+			if msg := checkConstraintValue(m, member, entry.Value, constraintPath(path, fmt.Sprintf("value %q", entry.Key))); msg != "" {
+				return msg
+			}
+		}
+	}
+	return ""
+}
+
+func checkEffectiveConstraints(member, target *model.Shape, value model.Node, path string) string {
+	if member.HasTrait(model.TraitRange) {
+		if msg := checkRangeConstraint(member, value, path); msg != "" {
+			return msg
+		}
+	} else if target != nil && target.HasTrait(model.TraitRange) {
+		if msg := checkRangeConstraint(target, value, path); msg != "" {
+			return msg
+		}
+	}
+	if member.HasTrait(model.TraitLength) {
+		if msg := checkLengthConstraint(member, value, path); msg != "" {
+			return msg
+		}
+	} else if target != nil && target.HasTrait(model.TraitLength) {
+		if msg := checkLengthConstraint(target, value, path); msg != "" {
+			return msg
+		}
+	}
+	if member.HasTrait(model.TraitPattern) {
+		if msg := checkPatternConstraint(member, value, path); msg != "" {
+			return msg
+		}
+	} else if target != nil && target.HasTrait(model.TraitPattern) {
+		if msg := checkPatternConstraint(target, value, path); msg != "" {
+			return msg
+		}
+	}
+	return ""
+}
+
+func checkShapeConstraints(shape *model.Shape, value model.Node, path string) string {
+	if msg := checkRangeConstraint(shape, value, path); msg != "" {
+		return msg
+	}
+	if msg := checkLengthConstraint(shape, value, path); msg != "" {
+		return msg
+	}
+	if msg := checkPatternConstraint(shape, value, path); msg != "" {
+		return msg
+	}
+	return ""
+}
+
+func checkRangeConstraint(shape *model.Shape, value model.Node, path string) string {
+	if value.Kind != model.NodeNumber {
+		return ""
+	}
+	min, max, ok := shape.Range()
+	if !ok {
+		return ""
+	}
+	v, err := strconv.ParseFloat(value.Num, 64)
+	if err != nil {
+		return ""
+	}
+	if min != nil && v < *min {
+		return fmt.Sprintf("%svalue %s is less than the minimum %v", path, value.Num, *min)
+	}
+	if max != nil && v > *max {
+		return fmt.Sprintf("%svalue %s is greater than the maximum %v", path, value.Num, *max)
+	}
+	return ""
+}
+
+func checkLengthConstraint(shape *model.Shape, value model.Node, path string) string {
+	min, max, ok := shape.Length()
+	if !ok {
+		return ""
+	}
+	var n int
+	switch value.Kind {
+	case model.NodeString:
+		n = utf8.RuneCountInString(value.Str)
+	case model.NodeArray:
+		n = len(value.Arr)
+	case model.NodeObject:
+		n = len(value.Obj)
+	default:
+		return ""
+	}
+	if min != nil && n < *min {
+		return fmt.Sprintf("%svalue has length %d, less than the minimum %d", path, n, *min)
+	}
+	if max != nil && n > *max {
+		return fmt.Sprintf("%svalue has length %d, greater than the maximum %d", path, n, *max)
+	}
+	return ""
+}
+
+func checkPatternConstraint(shape *model.Shape, value model.Node, path string) string {
+	if value.Kind != model.NodeString {
+		return ""
+	}
+	pattern, ok := shape.Pattern()
+	if !ok {
+		return ""
+	}
+	matched, err := regexp.MatchString(pattern, value.Str)
+	if err != nil {
+		return ""
+	}
+	if !matched {
+		return fmt.Sprintf("%svalue %q does not match pattern %q", path, value.Str, pattern)
+	}
+	return ""
+}
+
+func constraintPath(prefix, segment string) string {
+	if prefix == "" {
+		return segment + ": "
+	}
+	return prefix + "." + segment + ": "
+}
+
+// validateJSONNames rejects two members of one structure or union that resolve
+// to the same effective JSON object key.
+func validateJSONNames(m *model.Model) []Event {
+	var events []Event
+	for _, s := range m.Shapes() {
+		switch s.Type {
+		case model.TypeStructure, model.TypeUnion:
+		default:
+			continue
+		}
+		seen := make(map[string]*model.Shape)
+		for _, member := range s.Members {
+			name := member.ID.Member
+			if jsonName, ok := member.JSONName(); ok && jsonName != "" {
+				name = jsonName
+			}
+			if previous, ok := seen[name]; ok {
+				events = append(events, makeEvent(ModelInvalidMember, member.Source, member.ID,
+					"Members `%s` and `%s` of `%s` use the same @jsonName %q",
+					previous.ID, member.ID, s.ID, name))
+				continue
+			}
+			seen[name] = member
+		}
+	}
+	return events
+}
+
+// validateRangeBounds rejects fractional @range bounds on shapes whose Go/model
+// representation is integral. Upstream Smithy reports these as invalid trait
+// values; the codegen range comparisons otherwise depend on the bound being
+// representable.
+func validateRangeBounds(m *model.Model) []Event {
+	var events []Event
+	for _, s := range m.Shapes() {
+		if !s.HasTrait(model.TraitRange) {
+			continue
+		}
+		target := s
+		if s.IsMember() {
+			resolved, ok := m.Shape(s.Target)
+			if !ok {
+				continue
+			}
+			target = resolved
+		}
+		switch target.Type {
+		case model.TypeFloat, model.TypeDouble, model.TypeBigDecimal:
+			continue
+		}
+		min, max, ok := s.Range()
+		if !ok {
+			continue
+		}
+		if min != nil && !isIntegralBound(*min) {
+			events = append(events, makeEvent(ModelInvalidTraitValue, s.Source, s.ID,
+				"@range on `%s` has a fractional `min` value %v, but `%s` does not support decimals",
+				s.ID, *min, target.ID))
+		}
+		if max != nil && !isIntegralBound(*max) {
+			events = append(events, makeEvent(ModelInvalidTraitValue, s.Source, s.ID,
+				"@range on `%s` has a fractional `max` value %v, but `%s` does not support decimals",
+				s.ID, *max, target.ID))
+		}
+	}
+	return events
+}
+
+func isIntegralBound(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0) && v == math.Trunc(v)
 }
 
 func enumValues(m *model.Model, enum *model.Shape) map[string]bool {
