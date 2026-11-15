@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/tespeleta/gosmithy/idl"
+	"github.com/tespeleta/gosmithy/protocol/httpjson"
 )
 
 var version = "0.1.0-dev"
@@ -113,6 +114,16 @@ func runParse(args []string) error {
 
 // parseFiles parses every path with the CLI's default parser options. The CLI
 // assumes Smithy 2.0 when a file omits $version, matching PLAN.md.
+// appendBuiltinProtocols adds the protocol definitions compiled into gosmithy so
+// that gosmithy.protocols#* references resolve without a flag.
+func appendBuiltinProtocols(files []*idl.File) ([]*idl.File, error) {
+	definition, err := httpjson.Definition()
+	if err != nil {
+		return nil, err
+	}
+	return append(files, definition), nil
+}
+
 func parseFiles(paths []string) ([]*idl.File, error) {
 	files := make([]*idl.File, 0, len(paths))
 	for _, path := range paths {

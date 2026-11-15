@@ -1,3 +1,5 @@
 .gocache/
 *.log
 bin/
+gen/
+gen-http/

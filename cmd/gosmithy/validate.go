@@ -47,6 +47,10 @@ func runValidate(args []string) error {
 	if err != nil {
 		return err
 	}
+	files, err = appendBuiltinProtocols(files)
+	if err != nil {
+		return err
+	}
 	m, err := model.Assemble(files, model.Options{})
 	if err != nil {
 		return err

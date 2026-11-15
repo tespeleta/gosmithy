@@ -26,6 +26,9 @@ type Runner struct {
 	OutDir string
 	// DryRun plans the output without writing it.
 	DryRun bool
+	// Clean removes the output directory before writing. Generated directories
+	// are owned by the tool, so no state from a previous run is kept.
+	Clean bool
 	// Output receives diagnostics and a stable summary. A nil Output disables
 	// printing.
 	Output io.Writer
@@ -66,11 +69,11 @@ func (r *Runner) Run(ctx context.Context, req *Request, gens []Generator) (*RunR
 			return result, err
 		}
 		if gen == nil {
-			return result, fmt.Errorf("codegen: generator %d is nil", i)
+			return result, fmt.Errorf("codegen: %s is nil", generatorName(nil, i))
 		}
 		resp, err := gen.Generate(ctx, req)
 		if err != nil {
-			return result, fmt.Errorf("codegen: generator %d: %w", i, err)
+			return result, fmt.Errorf("codegen: %s: %w", generatorName(gen, i), err)
 		}
 		if resp == nil {
 			continue
@@ -79,7 +82,7 @@ func (r *Runner) Run(ctx context.Context, req *Request, gens []Generator) (*RunR
 		for _, file := range resp.Files {
 			clean, err := cleanRelativePath(file.Path)
 			if err != nil {
-				return result, fmt.Errorf("codegen: generator %d: %w", i, err)
+				return result, fmt.Errorf("codegen: %s: %w", generatorName(gen, i), err)
 			}
 			file.Path = clean
 			if existing, ok := merged[clean]; ok {
@@ -121,6 +124,11 @@ func (r *Runner) Run(ctx context.Context, req *Request, gens []Generator) (*RunR
 	if err != nil {
 		return result, fmt.Errorf("codegen: resolving output directory: %w", err)
 	}
+	if r.Clean {
+		if err := cleanOutputDir(outAbs); err != nil {
+			return result, err
+		}
+	}
 	for _, file := range result.Files {
 		if err := ctx.Err(); err != nil {
 			return result, err
@@ -135,8 +143,49 @@ func (r *Runner) Run(ctx context.Context, req *Request, gens []Generator) (*RunR
 		result.Written = append(result.Written, file.Path)
 	}
 	sort.Strings(result.Written)
+
 	r.printSummary(result)
 	return result, nil
+}
+
+// cleanOutputDir removes the output directory before a run so that only files
+// from this run remain.
+func cleanOutputDir(outAbs string) error {
+	if err := checkCleanable(outAbs); err != nil {
+		return err
+	}
+	if err := os.RemoveAll(outAbs); err != nil {
+		return fmt.Errorf("codegen: cleaning %s: %w", outAbs, err)
+	}
+	return nil
+}
+
+// checkCleanable rejects output directories the tool must never delete: the
+// filesystem root, the working directory, and its ancestors. A generated
+// directory never contains the working directory.
+func checkCleanable(outAbs string) error {
+	if filepath.Dir(outAbs) == outAbs {
+		return fmt.Errorf("codegen: refusing to clean the filesystem root %q", outAbs)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("codegen: resolving the working directory: %w", err)
+	}
+	if cwd == outAbs || strings.HasPrefix(cwd, outAbs+string(filepath.Separator)) {
+		return fmt.Errorf("codegen: refusing to clean %q: it contains the working directory", outAbs)
+	}
+	return nil
+}
+
+// generatorName identifies a generator in error messages, preferring its own
+// name over its position in the run.
+func generatorName(gen Generator, index int) string {
+	if named, ok := gen.(NamedGenerator); ok {
+		if name := named.Name(); name != "" {
+			return name
+		}
+	}
+	return fmt.Sprintf("generator %d", index)
 }
 
 func (r *Runner) printDiagnostics(diags []Diagnostic) {
@@ -158,8 +207,9 @@ func (r *Runner) printSummary(result *RunResult) {
 		count = len(result.Files)
 		verb = "planned"
 	}
-	fmt.Fprintf(r.Output, "%d file(s) %s, %d skipped, %d diagnostic(s)\n",
+	line := fmt.Sprintf("%d file(s) %s, %d skipped, %d diagnostic(s)",
 		count, verb, len(result.Skipped), len(result.Diagnostics))
+	fmt.Fprintln(r.Output, line)
 }
 
 func hasDanger(diags []Diagnostic) bool {

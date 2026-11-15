@@ -25,6 +25,13 @@ type Generator interface {
 	Generate(ctx context.Context, req *Request) (*Response, error)
 }
 
+// NamedGenerator is an optional interface a generator implements to report a
+// stable name. The runner uses it in error messages; unnamed generators are
+// identified by their position in the run.
+type NamedGenerator interface {
+	Name() string
+}
+
 // GeneratorFunc adapts a function to the Generator interface.
 type GeneratorFunc func(ctx context.Context, req *Request) (*Response, error)
 

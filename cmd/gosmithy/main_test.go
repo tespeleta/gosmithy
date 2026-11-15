@@ -138,3 +138,80 @@ func TestParseFilesDefaultsToVersion2(t *testing.T) {
 		t.Errorf("default version = %s, want 2.0", files[0].Version)
 	}
 }
+
+func TestValidateBuiltinProtocol(t *testing.T) {
+	httpFixture := filepath.Join("..", "..", "testdata", "http.smithy")
+	output, err := captureStdout(t, func() error {
+		return run([]string{"validate", httpFixture})
+	})
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if output != "" {
+		t.Errorf("output = %q, want none", output)
+	}
+}
+
+func TestModelBuiltinProtocol(t *testing.T) {
+	httpFixture := filepath.Join("..", "..", "testdata", "http.smithy")
+	output, err := captureStdout(t, func() error {
+		return run([]string{"model", "--json", "-prelude=false", httpFixture})
+	})
+	if err != nil {
+		t.Fatalf("model: %v", err)
+	}
+	if !strings.Contains(output, `"gosmithy.protocols#httpJson":{}`) {
+		t.Errorf("model JSON does not apply the protocol trait")
+	}
+	if !strings.Contains(output, `"smithy.api#protocolDefinition"`) {
+		t.Errorf("model JSON does not include the protocol definition")
+	}
+}
+
+func TestModelProtocolsFlag(t *testing.T) {
+	weather := filepath.Join("..", "..", "testdata", "weather.smithy")
+	output, err := captureStdout(t, func() error {
+		return run([]string{"model", "--json", "-prelude=false", weather})
+	})
+	if err != nil {
+		t.Fatalf("model: %v", err)
+	}
+	if !strings.Contains(output, `"gosmithy.protocols#httpJson"`) {
+		t.Errorf("built-in protocol definition was not assembled")
+	}
+
+	output, err = captureStdout(t, func() error {
+		return run([]string{"model", "--json", "-prelude=false", "-protocols=false", weather})
+	})
+	if err != nil {
+		t.Fatalf("model -protocols=false: %v", err)
+	}
+	if strings.Contains(output, "gosmithy.protocols#") {
+		t.Errorf("-protocols=false still assembled the protocol definition")
+	}
+}
+
+func TestValidateBuiltinProtocolTrait(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "service.smithy")
+	src := `$version: "2.0"
+namespace example.absolute
+
+@gosmithy.protocols#httpJson
+service Svc {
+    version: "1.0.0"
+    operations: []
+}
+`
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	output, err := captureStdout(t, func() error {
+		return run([]string{"validate", path})
+	})
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if output != "" {
+		t.Errorf("output = %q, want none", output)
+	}
+}

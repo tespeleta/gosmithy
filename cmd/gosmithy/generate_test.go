@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -246,5 +247,57 @@ func runGoCommand(t *testing.T, dir string, args ...string) {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("go %s failed: %v\n%s", strings.Join(args, " "), err, out)
+	}
+}
+
+func TestGenerateModelEventsGoToStdout(t *testing.T) {
+	broken := filepath.Join("..", "..", "testdata", "broken.smithy")
+	output, err := captureStdout(t, func() error {
+		return run([]string{
+			"generate",
+			"--service", "example.weather#Weather",
+			"--module", "example.com/x",
+			"--out", t.TempDir(),
+			broken,
+		})
+	})
+	var exit *exitError
+	if !errors.As(err, &exit) || exit.code != 1 {
+		t.Fatalf("generate error = %v, want exit 1", err)
+	}
+	if !strings.Contains(output, "DANGER") || !strings.Contains(output, "MissingShape") {
+		t.Errorf("stdout = %q, want model diagnostics", output)
+	}
+}
+
+func TestGenerateClean(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "gen")
+	generate := func(extra ...string) error {
+		args := append([]string{
+			"generate",
+			"--service", "example.weather#Weather",
+			"--generator", "go",
+			"--module", "example.com/weather",
+			"--out", out,
+		}, extra...)
+		args = append(args, weatherPath())
+		_, err := captureStdout(t, func() error { return run(args) })
+		return err
+	}
+	if err := generate(); err != nil {
+		t.Fatalf("first generate: %v", err)
+	}
+	junk := filepath.Join(out, "junk.txt")
+	if err := os.WriteFile(junk, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := generate("--clean"); err != nil {
+		t.Fatalf("clean generate: %v", err)
+	}
+	if _, err := os.Stat(junk); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("--clean did not remove the output directory: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "go.mod")); err != nil {
+		t.Errorf("--clean removed generated files: %v", err)
 	}
 }

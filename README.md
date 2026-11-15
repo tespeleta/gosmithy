@@ -45,7 +45,7 @@ make build
 ./bin/gosmithy model --json testdata/weather.smithy | head
 ./bin/gosmithy generate --service example.weather#Weather \
     --generator go --module example.com/weather --out ./gen testdata/weather.smithy
-(cd gen && go build ./... && go test ./...)
+(cd gen && go build ./...)
 
 # HTTP+JSON client and server
 ./bin/gosmithy generate --service example.library#Library \
@@ -58,11 +58,22 @@ make build
 `git describe` (falls back to `0.1.0-dev`). Override it with
 `make build VERSION=1.2.3`, or use `go build ./cmd/gosmithy` directly.
 
+Generated modules contain no tests, so the quick start checks them with
+`go build ./...`; the repository's own round-trip and compile-matrix suites live
+under `codegen/golang`.
+
 `parse` prints a debug JSON view of the AST, including line/column source
 locations. `validate` exits 1 when any DANGER event is reported, and prints
 events in the form `file:line:column: SEVERITY: message`. `model --json` prints
 a deterministic debug view of the assembled semantic model (not a Smithy JSON
-AST conformance surface); pass `-prelude=false` to omit prelude shapes.
+AST conformance surface); pass `-prelude=false` to omit prelude shapes and
+`-protocols=false` to omit the built-in protocol definitions.
+Normal output, including validation events and generation diagnostics, goes to
+stdout; fatal errors and usage go to stderr.
+
+`validate`, `model`, and `generate` always assemble the embedded
+`gosmithy.protocols#httpJson` definition, so protocol models need no extra flag;
+`--protocol` in `generate` only selects the wire protocol for codegen.
 
 ```console
 $ ./bin/gosmithy validate testdata/broken.smithy
@@ -165,6 +176,11 @@ type Request struct {
 their files, rejects paths outside the output directory, detects duplicate
 paths with differing content, and writes only after every generator succeeds.
 DANGER diagnostics abort the run.
+
+The output directory is owned by the tool. Pass `--clean` to remove it before
+writing, so outputs from an older model do not linger. Without `--clean` the
+runner only writes and overwrites files, and files it no longer generates stay
+behind.
 
 ```console
 $ ./bin/gosmithy generate --service example.weather#Weather \

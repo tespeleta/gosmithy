@@ -33,6 +33,7 @@ func runGenerate(args []string) error {
 	protocolName := fs.String("protocol", "", "wire protocol to generate (for example gosmithy.protocols#httpJson)")
 	module := fs.String("module", "", "Go module path for the generated module")
 	out := fs.String("out", "", "output directory")
+	clean := fs.Bool("clean", false, "remove the output directory before writing")
 	list := fs.Bool("list-generators", false, "list registered generators and exit")
 	var rawOptions optionFlags
 	fs.Var(&rawOptions, "opt", "generator option key=value (repeatable)")
@@ -96,15 +97,18 @@ func runGenerate(args []string) error {
 
 	var selectedProtocol *codegen.Protocol
 	if *protocolName != "" {
-		protocol, definition, err := httpjson.Select(*protocolName)
+		protocol, _, err := httpjson.Select(*protocolName)
 		if err != nil {
 			return err
 		}
 		selectedProtocol = protocol
-		// The protocol definition is an embedded model. It is assembled with
-		// the user's files so that an explicit @httpJson application resolves,
-		// but the CLI selection remains authoritative.
-		files = append(files, definition)
+	}
+
+	// Built-in protocol definitions are always assembled so @httpJson resolves
+	// even for model-only generation; --protocol only selects the wire protocol.
+	files, err = appendBuiltinProtocols(files)
+	if err != nil {
+		return err
 	}
 
 	m, err := model.Assemble(files, model.Options{})
@@ -115,7 +119,7 @@ func runGenerate(args []string) error {
 	events := validation.Validate(m)
 	hasDanger := false
 	for _, event := range events {
-		fmt.Fprintln(os.Stderr, event.String())
+		fmt.Fprintln(os.Stdout, event.String())
 		if event.Severity == validation.Danger {
 			hasDanger = true
 		}
@@ -142,6 +146,7 @@ func runGenerate(args []string) error {
 	}
 	runner := &codegen.Runner{
 		OutDir: *out,
+		Clean:  *clean,
 		Output: os.Stdout,
 	}
 	_, err = runner.Run(context.Background(), req, []codegen.Generator{gen})

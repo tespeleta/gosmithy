@@ -23,6 +23,10 @@ const GeneratorName = "go"
 // New returns the Go generator.
 func New() codegen.Generator { return &generator{} }
 
+// Name implements codegen.NamedGenerator so the runner can identify the Go
+// generator in error messages.
+func (g *generator) Name() string { return GeneratorName }
+
 // generator holds the per-request state of one Go generation run.
 type generator struct {
 	req     *codegen.Request

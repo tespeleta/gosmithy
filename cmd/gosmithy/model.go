@@ -14,6 +14,7 @@ func runModel(args []string) error {
 	fs.SetOutput(os.Stderr)
 	jsonOut := fs.Bool("json", false, "print the model as debug JSON")
 	includePrelude := fs.Bool("prelude", true, "include prelude shapes in the output")
+	includeProtocols := fs.Bool("protocols", true, "assemble the built-in protocol definitions")
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "Usage: gosmithy model [flags] <file>...")
 		fs.PrintDefaults()
@@ -32,6 +33,12 @@ func runModel(args []string) error {
 	files, err := parseFiles(fs.Args())
 	if err != nil {
 		return err
+	}
+	if *includeProtocols {
+		files, err = appendBuiltinProtocols(files)
+		if err != nil {
+			return err
+		}
 	}
 	m, err := model.Assemble(files, model.Options{})
 	if err != nil {

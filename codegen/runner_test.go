@@ -226,3 +226,99 @@ func assertDirEmpty(t *testing.T, dir string) {
 		t.Fatalf("output directory is not empty: %v", names)
 	}
 }
+
+// namedFake is a generator that reports a name in errors.
+type namedFake struct {
+	name string
+	Generator
+}
+
+func (n namedFake) Name() string { return n.name }
+
+func TestRunnerNamesGeneratorInErrors(t *testing.T) {
+	failing := namedFake{
+		name: "fancy",
+		Generator: GeneratorFunc(func(context.Context, *Request) (*Response, error) {
+			return nil, errors.New("boom")
+		}),
+	}
+	r := &Runner{OutDir: t.TempDir()}
+	_, err := r.Run(context.Background(), &Request{}, []Generator{failing})
+	if err == nil || !strings.Contains(err.Error(), "codegen: fancy: boom") {
+		t.Fatalf("Run error = %v, want the generator name", err)
+	}
+}
+
+func TestRunnerCleanRemovesPreviousOutput(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "gen")
+	first := &Runner{OutDir: out}
+	if _, err := first.Run(context.Background(), &Request{}, []Generator{
+		fakeGenerator([]File{
+			{Path: "keep.txt", Content: []byte("old")},
+			{Path: "old/drop.txt", Content: []byte("old")},
+		}),
+	}); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	// Anything in a generated directory is owned by the tool, including files
+	// this run did not create.
+	if err := os.WriteFile(filepath.Join(out, "notes.txt"), []byte("stray"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	second := &Runner{OutDir: out, Clean: true}
+	result, err := second.Run(context.Background(), &Request{}, []Generator{
+		fakeGenerator([]File{{Path: "fresh.txt", Content: []byte("new")}}),
+	})
+	if err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+	for _, gone := range []string{"keep.txt", "old/drop.txt", "notes.txt", "old"} {
+		if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(gone))); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%s survived --clean", gone)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(out, "fresh.txt")); err != nil {
+		t.Errorf("fresh.txt missing: %v", err)
+	}
+	if got, want := strings.Join(result.Written, ","), "fresh.txt"; got != want {
+		t.Errorf("written = %q, want %q", got, want)
+	}
+}
+
+func TestRunnerCleanDryRunKeepsOutput(t *testing.T) {
+	out := t.TempDir()
+	if _, err := (&Runner{OutDir: out}).Run(context.Background(), &Request{}, []Generator{
+		fakeGenerator([]File{{Path: "a.txt", Content: []byte("a")}}),
+	}); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	result, err := (&Runner{OutDir: out, DryRun: true, Clean: true}).Run(context.Background(), &Request{}, []Generator{
+		fakeGenerator([]File{{Path: "b.txt", Content: []byte("b")}}),
+	})
+	if err != nil {
+		t.Fatalf("dry Run: %v", err)
+	}
+	if len(result.Written) != 0 {
+		t.Errorf("dry run wrote %v", result.Written)
+	}
+	if _, err := os.Stat(filepath.Join(out, "a.txt")); err != nil {
+		t.Errorf("dry run with Clean removed an output: %v", err)
+	}
+}
+
+func TestCheckCleanableRefusesOwnedParents(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := checkCleanable(cwd); err == nil || !strings.Contains(err.Error(), "working directory") {
+		t.Errorf("checkCleanable(cwd) = %v, want refusal", err)
+	}
+	if err := checkCleanable(filepath.Dir(cwd)); err == nil || !strings.Contains(err.Error(), "working directory") {
+		t.Errorf("checkCleanable(parent) = %v, want refusal", err)
+	}
+	if err := checkCleanable(string(os.PathSeparator)); err == nil {
+		t.Errorf("checkCleanable(root) = %v, want refusal", err)
+	}
+}
