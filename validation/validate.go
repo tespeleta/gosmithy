@@ -51,6 +51,7 @@ func Validate(m *model.Model) []Event {
 	events = append(events, validateJSONNames(m)...)
 	events = append(events, validateTraitConstraints(m)...)
 	events = append(events, validateTraitTargets(m)...)
+	events = append(events, validateSyntheticShapes(m)...)
 	events = append(events, validateSyntacticShapeIDs(m)...)
 	model.SortDiagnostics(events)
 	return events
@@ -62,15 +63,6 @@ func validateTargets(m *model.Model) []Event {
 	var events []Event
 	for _, s := range m.Shapes() {
 		if s.IsMember() {
-			if s.Inline != nil {
-				for _, ref := range s.Inline.Refs {
-					if !m.HasShape(ref.ID) {
-						events = append(events, makeEvent(ModelUnresolvedShape, ref.Source, s.ID,
-							"Target `%s` is not found in the model", ref.ID))
-					}
-				}
-				continue
-			}
 			if s.Target.IsZero() {
 				continue
 			}
@@ -979,6 +971,35 @@ func validateTraitTargets(m *model.Model) []Event {
 	return events
 }
 
+// --- synthetic shapes ---------------------------------------------------------
+
+// validateSyntheticShapes enforces the 2.1 rule that traits cannot be applied
+// to assembler-generated shapes, and warns when a user-defined shape uses the
+// reserved _Synthetic prefix.
+func validateSyntheticShapes(m *model.Model) []Event {
+	var events []Event
+	for _, s := range m.Shapes() {
+		if s.HasTrait(model.TraitSynthetic) {
+			for _, traitID := range s.Traits.SortedIDs() {
+				if traitID == model.TraitSynthetic {
+					continue
+				}
+				events = append(events, makeEvent(ModelInvalidTraitTarget, s.Source, s.ID,
+					"Traits cannot be applied to synthetic shapes: found trait `%s` on assembler-generated shape `%s`",
+					traitID, s.ID))
+			}
+			continue
+		}
+		if s.IsMember() || !strings.HasPrefix(s.ID.Name, "_Synthetic") {
+			continue
+		}
+		events = append(events, makeWarning(ModelInvalidTraitTarget, s.Source, s.ID,
+			"Shape name starts with `_Synthetic`, which is reserved for assembler-generated shapes; consider renaming `%s`",
+			s.ID))
+	}
+	return events
+}
+
 // --- syntactic shape IDs ------------------------------------------------------
 
 func validateSyntacticShapeIDs(m *model.Model) []Event {
@@ -1015,9 +1036,17 @@ func checkSyntacticNodes(m *model.Model, n model.Node, owner model.ShapeID) []Ev
 // --- helpers ------------------------------------------------------------------
 
 func makeEvent(id string, loc idl.SourceLocation, shapeID model.ShapeID, format string, args ...any) Event {
+	return makeDiagnostic(model.SeverityDanger, id, loc, shapeID, format, args...)
+}
+
+func makeWarning(id string, loc idl.SourceLocation, shapeID model.ShapeID, format string, args ...any) Event {
+	return makeDiagnostic(model.SeverityWarning, id, loc, shapeID, format, args...)
+}
+
+func makeDiagnostic(severity model.Severity, id string, loc idl.SourceLocation, shapeID model.ShapeID, format string, args ...any) Event {
 	return model.Diagnostic{
 		ID:       id,
-		Severity: model.SeverityDanger,
+		Severity: severity,
 		Message:  fmt.Sprintf(format, args...),
 		ShapeID:  shapeID,
 		Source:   loc,

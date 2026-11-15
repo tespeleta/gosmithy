@@ -178,13 +178,6 @@ func (s *Shape) toMap() map[string]any {
 			if m.Elided {
 				member["elided"] = true
 			}
-			if m.Inline != nil {
-				refs := make([]string, 0, len(m.Inline.Refs))
-				for _, ref := range m.Inline.Refs {
-					refs = append(refs, ref.ID.String())
-				}
-				member["inline"] = refs
-			}
 			members[m.ID.Member] = member
 		}
 		out["members"] = members

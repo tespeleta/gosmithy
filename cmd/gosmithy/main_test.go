@@ -215,3 +215,29 @@ service Svc {
 		t.Errorf("output = %q, want none", output)
 	}
 }
+
+func TestModelProtocolsFalseKeepsBuiltinIdx(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "indexed.smithy")
+	src := `$version: "2.1"
+namespace example
+
+structure S {
+    1. value: String
+}
+`
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	output, err := captureStdout(t, func() error {
+		return run([]string{"model", "--json", "-prelude=false", "-protocols=false", path})
+	})
+	if err != nil {
+		t.Fatalf("model: %v", err)
+	}
+	if !strings.Contains(output, `"smithy.protocols#idx"`) {
+		t.Errorf("-protocols=false dropped the built-in idx trait definition")
+	}
+	if strings.Contains(output, "gosmithy.protocols#") {
+		t.Errorf("-protocols=false still assembled the wire protocol definition")
+	}
+}

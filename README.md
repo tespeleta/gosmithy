@@ -13,27 +13,60 @@ A Go implementation of the Smithy IDL and a pluggable code generator.
 
 ## Status
 
-**Milestones 1–4 are implemented:** the parser covers the full IDL 2.0 grammar
-plus the 2.1 syntax additions; the semantic model assembles the prelude,
-fixtures, mixins, inline I/O, and service closures; structural validation
-reports unresolved references, invalid members, invalid operation I/O and
-errors, mixin problems, enum problems, and syntactic shape IDs; the `go`
-code generator emits a self-contained Go module with data types and
-validators; and `gosmithy.protocols#httpJson` adds an HTTP binding index,
-generated clients and servers, JSON value codecs, and protocol errors. See
-[`docs/http-json-protocol.md`](docs/http-json-protocol.md).
+**Milestones 1–4 and the Smithy 2.1 semantics are implemented:** the parser
+covers the full IDL 2.0 grammar plus the 2.1 syntax additions; the semantic
+model assembles the prelude, fixtures, mixins, inline I/O, and service
+closures, and implements the 2.1 semantics (synthetic inline collections and
+member indexes); structural validation reports unresolved references, invalid
+members, invalid operation I/O and errors, mixin problems, enum problems, and
+syntactic shape IDs; the `go` code generator emits a self-contained Go module
+with data types and validators; and `gosmithy.protocols#httpJson` adds an HTTP
+binding index, generated clients and servers, JSON value codecs, and protocol
+errors. See [`docs/http-json-protocol.md`](docs/http-json-protocol.md).
 
 Fixture results against the upstream Smithy corpus:
 
 | Category | Result |
 |---|---:|
 | Valid fixtures parse | 100 / 100 |
-| Valid non-2.1 fixtures assemble | 81 / 81 |
+| Valid fixtures assemble | 100 / 100 |
 | Invalid fixtures matched by parser errors | 180 / 207 |
 | Semantic invalid fixtures matched by assembly/validation | 27 / 27 |
 
 The parser-only skips are documented in
 [`testdata/loader/CLASSIFICATION.md`](testdata/loader/CLASSIFICATION.md).
+
+## Smithy feature coverage
+
+At a glance; the [model](#known-m2-limitations) and
+[codegen](#known-limitations) limitation lists have the details.
+
+### Covered
+
+- [x] IDL 2.0 grammar and the 2.1 additions: inline collections, member
+      indexes, and tagged literals.
+- [x] Assembly: prelude, namespaces and `use`, `apply`, forward references,
+      mixins, inline operation I/O, duplicate merging, and service closures.
+- [x] 2.1 semantics: synthetic inline list/map shapes with stable names,
+      grouping, nesting, `@synthetic`, and `smithy.protocols#idx`.
+- [x] Structural validation: unresolved targets, invalid members, operation
+      I/O and errors, mixins, enums, and syntactic shape IDs.
+- [x] Go code generation: types, validators, enums, unions, errors, and
+      `httpJson` clients and servers.
+- [x] Self-contained generated modules that use only the standard library.
+
+### Not covered
+
+- **AWS**: AWS protocols, auth and signing, endpoints, SigV4, and AWS traits.
+- **Full validation**: the selector engine, the complete validator suite,
+  suppressions, severity overrides, and model transforms.
+- **Other input formats**: the JSON AST loader, `smithy-build.json`,
+  projections, and plugin/Maven resolution.
+- **Other wire features**: streaming, event streams, XML, CBOR, multipart,
+  retries, and compression.
+- **Other targets**: non-Go code generators and the Java codegen framework.
+- **Protocol-traits breadth**: service-level `indexed` validation and `idx`
+  range/contiguity; only the minimal `idx` trait definition is built in.
 
 ## Quick start
 
@@ -67,13 +100,15 @@ locations. `validate` exits 1 when any DANGER event is reported, and prints
 events in the form `file:line:column: SEVERITY: message`. `model --json` prints
 a deterministic debug view of the assembled semantic model (not a Smithy JSON
 AST conformance surface); pass `-prelude=false` to omit prelude shapes and
-`-protocols=false` to omit the built-in protocol definitions.
+`-protocols=false` to omit the built-in wire protocol definitions. The
+`smithy.protocols#idx` trait used by 2.1 member indexes is always built in.
 Normal output, including validation events and generation diagnostics, goes to
 stdout; fatal errors and usage go to stderr.
 
-`validate`, `model`, and `generate` always assemble the embedded
-`gosmithy.protocols#httpJson` definition, so protocol models need no extra flag;
-`--protocol` in `generate` only selects the wire protocol for codegen.
+`validate`, `model`, and `generate` assemble the embedded
+`gosmithy.protocols#httpJson` definition by default, so protocol models need no
+extra flag; `model -protocols=false` omits it, and `--protocol` in `generate`
+only selects the wire protocol for codegen.
 
 ```console
 $ ./bin/gosmithy validate testdata/broken.smithy
@@ -140,9 +175,8 @@ identifiers in node values) are resolved to absolute shape IDs and marked with
 
 ### Known M2 limitations
 
-- IDL 2.1 semantics are not implemented. Inline collection targets are parsed
-  and their references are resolved for diagnostics, but synthetic collection
-  shapes are not created. The 18 valid 2.1 fixtures are parsed, not assembled.
+- Service-level `indexed` validation and `idx` range/contiguity checks are not
+  implemented; only the minimal `idx` trait definition is built in.
 - Selector-based trait validation, custom validators, suppressions, and
   severity overrides are not implemented. A set of cheap, explicit trait target
   checks is applied instead.
@@ -251,8 +285,6 @@ failures, and empty operations.
   [`docs/plan/04-http-json-protocol.md`](docs/plan/04-http-json-protocol.md).
 - `@length` counts Unicode code points for strings and bytes for blobs.
 - `@range` on `bigInteger` and `bigDecimal` is not generated.
-- IDL 2.1 inline collection targets are not generated yet because M2 does not
-  create their synthetic collection shapes.
 
 ## Parser API
 
@@ -336,7 +368,7 @@ The fixture harness lives in `idl/fixtures_test.go`:
 - the semantic invalid fixtures are exercised by `model/` and `validation/`
   tests, which assert the event ID, message, and source location.
 
-The semantic model tests also assemble every non-2.1 valid fixture and compare
+The semantic model tests also assemble every valid fixture and compare
 flattened mixin models against the upstream `.flattened.smithy` fixtures.
 
 The `codegen/golang` tests generate the weather and validator fixtures, compare
@@ -368,6 +400,9 @@ one document:
    contract, Go types and validators. **Implemented.**
 4. [Generic HTTP+JSON](docs/plan/04-http-json-protocol.md) — `httpJson`
    protocol, generated client and server. **Implemented.**
+5. [Smithy 2.1 semantics](docs/plan/05-smithy-2.1-semantics.md) — synthetic
+   inline collections, member indexes, and feature-coverage docs.
+   **Implemented.**
 
 ## Attribution
 

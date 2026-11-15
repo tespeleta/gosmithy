@@ -312,6 +312,73 @@ structure In {
 	},
 }
 
+func TestCompileInlineCollections(t *testing.T) {
+	m := assembleSources(t, `$version: "2.1"
+namespace tdd
+
+service S {
+    version: "1.0.0"
+    operations: [Op]
+}
+
+union Choice {
+    names: [String]
+    tags: {String: Integer}
+}
+
+structure In {
+    names: [String]
+    tags: {String: Integer}
+    nested: {String: [String]}
+    choice: Choice
+}
+
+@http(method: "POST", uri: "/op")
+operation Op {
+    input: In
+}
+`)
+	files, diags, err := runProtocolGenerator(t, m, model.MustShapeID("tdd#S"), "example.com/contract")
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	requireNoGeneratorDanger(t, diags)
+	dir := t.TempDir()
+	writeFiles(t, dir, files)
+	runGo(t, dir, "build", "./...")
+}
+
+func TestCompileInlineCollectionNameCollision(t *testing.T) {
+	m := assembleSources(t, `$version: "2.1"
+namespace tdd
+
+service S {
+    version: "1.0.0"
+    operations: [Op]
+}
+
+structure syntheticListOfString {}
+
+structure In {
+    items: [String]
+    collision: syntheticListOfString
+}
+
+@http(method: "POST", uri: "/op")
+operation Op {
+    input: In
+}
+`)
+	files, diags, err := runProtocolGenerator(t, m, model.MustShapeID("tdd#S"), "example.com/contract")
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	requireNoGeneratorDanger(t, diags)
+	dir := t.TempDir()
+	writeFiles(t, dir, files)
+	runGo(t, dir, "build", "./...")
+}
+
 func TestCompileMatrix(t *testing.T) {
 	for _, tc := range matrixCases {
 		t.Run(tc.name, func(t *testing.T) {

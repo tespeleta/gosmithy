@@ -31,8 +31,8 @@ Smithy IDL text
   endpoints, SigV4.
 - The full ~78-validator suite, selector engine, custom validators,
   suppressions.
-- Semantic assembly of 2.1-only syntax: synthetic inline-collection shapes,
-  synthetic naming, and `idx` application are M2 work. M1 parses the syntax.
+- Service-level `indexed` validation and `idx` range/contiguity checks; the
+  minimal `idx` trait definition is built in.
 - `smithy-build.json`, projections, transforms, plugin/Maven resolution.
 - JSON AST loading (a debug model JSON view is not a conformance claim; full loader later).
 - Streaming, event streams, XML, CBOR, auth, retries.
@@ -261,9 +261,8 @@ var (
   (2.1), as required by the spec. `$version: "2.1"` requests 2.1 explicitly.
 - 2.1 constructs in a file that declares 2.0 (or defaults to it) produce a
   clear "requires Smithy IDL version 2.1" error.
-- 2.1 semantics are deliberately deferred: M1 records inline targets and
-  member indexes in the AST; M2 creates synthetic collection shapes and
-  applies `smithy.protocols#idx`.
+- 2.1 semantics are implemented: inline collections create synthetic
+  collection shapes, and member indexes apply `smithy.protocols#idx`.
 - The parser takes `idl.Options{Version, DefaultVersion}`. `Version` caps the
   supported feature set, and `DefaultVersion` is assumed when a file omits
   `$version` (2.0 by default, per the milestone-1 plan).
@@ -318,6 +317,7 @@ and the parser are not, so they are one milestone.
 | 2 | [Semantic model](docs/plan/02-semantic-model.md) | Resolution + prelude + structural validation | `gosmithy validate` / `model` on real models | 1 | 7d |
 | 3 | [Codegen core + Go models](docs/plan/03-codegen-core-and-go.md) | Plugin contract + first Go generator | Generated Go module with types + validators, compiles | 2 | 6d |
 | 4 | [Generic HTTP+JSON](docs/plan/04-http-json-protocol.md) | Protocol + HTTP bindings + client/server | Round-trip generated client/server for `httpJson` | 3 | 9d |
+| 5 | [Smithy 2.1 semantics](docs/plan/05-smithy-2.1-semantics.md) | Synthetic inline collections + member indexes | 100/100 valid fixtures assemble | 4 | 3d |
 
 - **MVP boundary: end of Milestone 3.** Parsing, validation, Go models, and
   validators are already a real tool.
@@ -354,6 +354,12 @@ codec, generated client and server, routing, errors, validation → 400,
 round-trip tests over `httptest`. Exit: a realistic service generates, compiles,
 and round-trips. No AWS.
 
+**M5 — Smithy 2.1 semantics. Implemented.**
+Synthetic inline list/map shapes with upstream-compatible naming, grouping,
+nesting, and `@synthetic`; member index shorthand backed by a built-in
+`smithy.protocols#idx`; Go types for synthetic collections. Exit: all 100 valid
+fixtures assemble and the README states feature coverage and non-coverage.
+
 ---
 
 ## 5. Testing strategy
@@ -362,8 +368,8 @@ and round-trips. No AWS.
    - `testdata/loader/valid/**` — must parse.
    - `testdata/loader/invalid/**` — first line is the expected error; classify
      syntax vs semantic, and only assert syntax in M1.
-   - valid 2.1 fixtures parse; 2.1 constructs in 2.0 files are tested as
-     version-gated errors.
+   - valid 2.1 fixtures parse and assemble; 2.1 constructs in 2.0 files are
+     tested as version-gated errors.
 2. **Model tests.** Prelude, weather example, forward refs, `use` aliases,
    apply-to-member, mixins, inline I/O, merge rules, closure.
 3. **Validation tests.** Specific invalid models with expected event IDs and
@@ -402,12 +408,13 @@ Decisions still open:
 
 ## 7. Next action
 
-Milestones 1–4 are implemented; see
+Milestones 1–5 are implemented; see
 [`docs/plan/01-parser-foundation.md`](docs/plan/01-parser-foundation.md),
 [`docs/plan/02-semantic-model.md`](docs/plan/02-semantic-model.md),
-[`docs/plan/03-codegen-core-and-go.md`](docs/plan/03-codegen-core-and-go.md), and
-[`docs/plan/04-http-json-protocol.md`](docs/plan/04-http-json-protocol.md), plus
-the protocol guide in [`docs/http-json-protocol.md`](docs/http-json-protocol.md).
+[`docs/plan/03-codegen-core-and-go.md`](docs/plan/03-codegen-core-and-go.md),
+[`docs/plan/04-http-json-protocol.md`](docs/plan/04-http-json-protocol.md), and
+[`docs/plan/05-smithy-2.1-semantics.md`](docs/plan/05-smithy-2.1-semantics.md),
+plus the protocol guide in [`docs/http-json-protocol.md`](docs/http-json-protocol.md).
 The first post-M4 follow-up is the JSON AST loader described in
 [`docs/plan/04-http-json-protocol.md`](docs/plan/04-http-json-protocol.md#10-deferred-to-the-end-json-ast-loader).
 No AWS protocols, traits, or code paths are part of the project.

@@ -290,16 +290,46 @@ func (g *generator) isDataShape(shape *model.Shape) bool {
 }
 
 func (g *generator) buildTypeNames() {
-	for _, shape := range g.shapes {
+	// User-defined shapes claim names first so that a synthetic shape can
+	// always be renamed out of the way.
+	assign := func(shape *model.Shape, allowRename bool) {
 		name := safeTypeName(g.rawShapeName(shape.ID))
 		if previous, exists := g.packageNames[name]; exists && previous != shape.ID {
-			g.diagnosticAt(validation.Danger, shape.Source,
-				"Go type name %q for `%s` collides with `%s`; use the service `rename` map to disambiguate",
-				name, shape.ID, previous)
+			if allowRename {
+				// Synthetic shapes cannot be referenced by user code, so
+				// renaming one is always safe and keeps generated code
+				// compiling when a user shape owns the preferred name.
+				name = g.freeSyntheticTypeName(name)
+			} else {
+				g.diagnosticAt(validation.Danger, shape.Source,
+					"Go type name %q for `%s` collides with `%s`; use the service `rename` map to disambiguate",
+					name, shape.ID, previous)
+			}
 		}
 		g.typeNames[shape.ID] = name
 		if _, exists := g.packageNames[name]; !exists {
 			g.packageNames[name] = shape.ID
+		}
+	}
+	for _, shape := range g.shapes {
+		if !shape.HasTrait(model.TraitSynthetic) {
+			assign(shape, false)
+		}
+	}
+	for _, shape := range g.shapes {
+		if shape.HasTrait(model.TraitSynthetic) {
+			assign(shape, true)
+		}
+	}
+}
+
+// freeSyntheticTypeName returns name with a numeric suffix that is not already
+// taken by another generated type.
+func (g *generator) freeSyntheticTypeName(name string) string {
+	for i := 2; ; i++ {
+		candidate := fmt.Sprintf("%s%d", name, i)
+		if _, exists := g.packageNames[candidate]; !exists {
+			return candidate
 		}
 	}
 }

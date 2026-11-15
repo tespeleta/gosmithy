@@ -85,6 +85,7 @@ var (
 	TraitTitle           = MustShapeID("smithy.api#title")
 	TraitExternalDocs    = MustShapeID("smithy.api#externalDocumentation")
 	TraitUnstable        = MustShapeID("smithy.api#unstable")
+	TraitSynthetic       = MustShapeID("smithy.api#synthetic")
 	TraitPaginated       = MustShapeID("smithy.api#paginated")
 	TraitReferences      = MustShapeID("smithy.api#references")
 	TraitEnum            = MustShapeID("smithy.api#enum")
@@ -191,20 +192,6 @@ type ResourceProps struct {
 	Resources            []ShapeID
 }
 
-// ShapeReference is a shape reference with a source location.
-type ShapeReference struct {
-	ID     ShapeID
-	Source idl.SourceLocation
-}
-
-// InlineTarget records an IDL 2.1 inline collection target. M2 does not
-// implement inline collection semantics; the referenced shape IDs are retained
-// so they can be validated and reported.
-type InlineTarget struct {
-	Source idl.SourceLocation
-	Refs   []ShapeReference
-}
-
 // Shape is a shape in the semantic model. Member shapes are first-class shapes
 // with Type == TypeMember, Container set, and Target set.
 type Shape struct {
@@ -228,8 +215,6 @@ type Shape struct {
 	ForResource ShapeID
 	// Elided reports that the member target was elided ($member).
 	Elided bool
-	// Inline is set for a 2.1 inline collection target.
-	Inline *InlineTarget
 
 	prelude bool
 	version idl.Version

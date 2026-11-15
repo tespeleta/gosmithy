@@ -5,11 +5,11 @@ Depends on: nothing
 
 > **Implementation note (2026-11-13).** The parser and fixture harness are
 > implemented. The upstream corpus has moved on since this plan was written:
-> it contains 18 valid files that declare 2.1 or use 2.1-only syntax (not 14),
+> it contains 19 valid files that declare 2.1 or use 2.1-only syntax (not 14),
 > and the 2.1 grammar deltas are small and local. Rather than skip them, the
 > implementation parses the 2.1 syntax additions — member indexes, inline
 > collection targets, and tagged string literals — while leaving 2.1
-> *semantics* to M2. All 100 valid fixtures parse. 180 of 207 invalid
+> *semantics* to M2 (implemented later in Milestone 5). All 100 valid fixtures parse. 180 of 207 invalid
 > fixtures match their expected parser error; the other 27 are semantic and
 > are listed in `testdata/loader/CLASSIFICATION.md`.
 

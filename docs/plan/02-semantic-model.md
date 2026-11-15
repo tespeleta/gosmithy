@@ -5,20 +5,21 @@ Deliverable: `gosmithy validate` and `gosmithy model` over real Smithy models.
 
 > **Implementation note (2026-11-14).** The semantic model, prelude, assembler,
 > mixin flattening, service closure, structural validators, and CLI commands are
-> implemented. All 81 non-2.1 valid fixtures assemble with no DANGER events
-> (the 18 valid 2.1 fixtures are parsed but not assembled, plus one fixture that
-> declares 2.1), and all 27 semantic invalid fixtures produce the expected event
-> category at the expected source location. Mixin flattening is additionally
-> compared against every upstream `.flattened.smithy` fixture.
+> implemented. All 100 valid fixtures assemble with no DANGER events, including
+> the 19 that use 2.1 syntax or version, and all 27 semantic invalid fixtures
+> produce the expected event category at the expected source location. Mixin
+> flattening is additionally compared against every upstream `.flattened.smithy`
+> fixture.
 >
-> Two implementation choices differ from the sketch below:
+> Two implementation notes differ from the sketch below:
 >
 > - `validation.Event` is an alias of `model.Diagnostic`. This keeps the
 >   dependency direction `idl → model → validation` without an import cycle;
 >   the assembler can record diagnostics while validation adds checks.
-> - IDL 2.1 semantics remain out of scope. Inline collection targets are parsed
->   and their leaf references are resolved so unresolved-target fixtures report
->   `Model.UnresolvedShape`; synthetic collection shapes are not created.
+> - The 2.1 semantics described in
+>   [Milestone 5](05-smithy-2.1-semantics.md) were added after this milestone:
+>   inline collections create synthetic shapes and member indexes apply
+>   `smithy.protocols#idx`.
 >
 > Event IDs are stable constants in `validation`: `Model.UnresolvedShape`,
 > `Model.InvalidMember`, `Model.InvalidMixin`, `Model.InvalidEnum`,
@@ -97,7 +98,7 @@ $ go run ./cmd/gosmithy model --json testdata/weather.smithy
 - Code generation.
 - Protocol selection or HTTP binding validation.
 - Model transforms/projections.
-- IDL 2.1 semantics.
+- IDL 2.1 semantics (added later in Milestone 5).
 
 ---
 
@@ -290,9 +291,9 @@ exceeds ~15 checks, introduce a `Validator` interface; not before.
 - [x] Prelude loads from the embedded real `prelude.smithy`.
 - [x] The weather example assembles; shape IDs, members, input/output, errors,
       and resource lifecycle operations resolve as expected.
-- [x] All non-2.1 valid fixtures assemble, with a documented skip list for
-      JSON-AST-dependent cases. The one shared `__shared.json` fixture is ported
-      to an IDL helper for tests (no JSON AST loader yet).
+- [x] All valid fixtures assemble, including the 2.1 fixtures added in
+      Milestone 5. The one shared `__shared.json` fixture is ported to an IDL
+      helper for tests (no JSON AST loader yet).
 - [x] All semantic invalid fixtures classified in M1 emit the expected event
       category and source location.
 - [x] `gosmithy validate` exits 0 on valid models and 1 on DANGER.

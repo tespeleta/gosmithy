@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/tespeleta/gosmithy/idl"
@@ -23,11 +24,13 @@ type Options struct {
 // load the embedded prelude.
 func Assemble(files []*idl.File, opts Options) (*Model, error) {
 	a := &assembler{
-		model:          NewModel(),
-		publicPrelude:  make(map[string]bool),
-		preludePrivate: make(map[string]bool),
-		traitDefs:      make(map[ShapeID]bool),
-		flattenState:   make(map[ShapeID]flattenState),
+		model:               NewModel(),
+		declared:            make(map[ShapeID]bool),
+		publicPrelude:       make(map[string]bool),
+		preludePrivate:      make(map[string]bool),
+		traitDefs:           make(map[ShapeID]bool),
+		syntheticSignatures: make(map[ShapeID]string),
+		flattenState:        make(map[ShapeID]flattenState),
 	}
 	a.traitDefs[TraitTrait] = true
 
@@ -44,6 +47,16 @@ func Assemble(files []*idl.File, opts Options) (*Model, error) {
 		if f != nil {
 			sorted = append(sorted, f)
 		}
+	}
+	// The built-in protocol-trait definitions make 2.1 member indexes work
+	// without the user supplying smithy.protocols#idx. A user definition of
+	// the same shape wins and suppresses the built-in one.
+	if !opts.DisablePrelude && !definesProtocolsIdx(files) {
+		builtin, err := parseBuiltinTraits()
+		if err != nil {
+			return nil, err
+		}
+		sorted = append(sorted, builtin)
 	}
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Path < sorted[j].Path })
 	for _, f := range sorted {
@@ -116,9 +129,16 @@ type assembler struct {
 	// caseIndex maps a lower-cased shape ID string to the first declared ID,
 	// used to detect case-insensitive conflicts.
 	caseIndex map[string]ShapeID
+	// declared holds every root shape ID declared by a file, including forward
+	// references, so local names shadow the prelude regardless of file order.
+	declared map[ShapeID]bool
 	// publicPrelude and preludePrivate map prelude root names to visibility.
 	publicPrelude  map[string]bool
 	preludePrivate map[string]bool
+
+	// syntheticSignatures records the content signature of every inline
+	// collection shape created by the assembler, keyed by shape ID.
+	syntheticSignatures map[ShapeID]string
 
 	flattenState map[ShapeID]flattenState
 }
@@ -134,16 +154,23 @@ func (a *assembler) danger(id string, loc idl.SourceLocation, shapeID ShapeID, f
 }
 
 // scanPrelude determines which prelude shapes are public and which are private
-// so relative IDs can resolve to public prelude shapes only.
+// so relative IDs can resolve to public prelude shapes only. It also records
+// every declared root shape ID so that local forward references shadow the
+// prelude, matching the reference implementation.
 func (a *assembler) scanPrelude() {
 	if a.caseIndex == nil {
 		a.caseIndex = make(map[string]ShapeID)
 	}
 	for _, fd := range a.files {
-		if !fd.prelude {
-			continue
-		}
 		for _, stmt := range fd.file.Shapes {
+			if s, ok := stmt.(*idl.ShapeStmt); ok {
+				if id, err := ParseShapeID(s.ID); err == nil {
+					a.declared[id] = true
+				}
+			}
+			if !fd.prelude {
+				continue
+			}
 			s, ok := stmt.(*idl.ShapeStmt)
 			if !ok {
 				continue
@@ -323,10 +350,9 @@ func (a *assembler) declareMembers(shape *Shape, members []idl.Member, fd *fileD
 
 func (a *assembler) declareMember(shape *Shape, m idl.Member, fd *fileData) {
 	var target ShapeID
-	var inline *InlineTarget
 	if !m.Elided {
 		if m.Target.IsInline() {
-			inline = a.inlineTarget(m.Target, fd)
+			target = a.declareInlineCollection(shape.ID.Namespace, m.Target, fd)
 		} else {
 			target = a.resolveRef(fd, m.Target.ID)
 		}
@@ -342,6 +368,7 @@ func (a *assembler) declareMember(shape *Shape, m idl.Member, fd *fileData) {
 		}
 		a.addTraits(existing.ID, m.Traits, fd)
 		a.addMemberDefault(existing, m, fd)
+		a.addMemberIndex(existing.ID, m, fd)
 		if m.Doc != "" {
 			a.addDoc(existing.ID, m.Doc, m.DocSource, fd)
 		}
@@ -354,7 +381,6 @@ func (a *assembler) declareMember(shape *Shape, m idl.Member, fd *fileData) {
 	member.Source = m.Source
 	member.Doc = m.Doc
 	member.Elided = m.Elided
-	member.Inline = inline
 	member.prelude = shape.prelude
 	member.version = fd.version
 	shape.AddMember(member)
@@ -362,9 +388,30 @@ func (a *assembler) declareMember(shape *Shape, m idl.Member, fd *fileData) {
 
 	a.addTraits(member.ID, m.Traits, fd)
 	a.addMemberDefault(member, m, fd)
+	a.addMemberIndex(member.ID, m, fd)
 	if m.Doc != "" {
 		a.addDoc(member.ID, m.Doc, m.DocSource, fd)
 	}
+}
+
+// addMemberIndex applies the smithy.protocols#idx trait for 2.1 member index
+// shorthand. Members are not reordered, and no range or contiguity rules are
+// enforced here; the trait only records the declared index.
+func (a *assembler) addMemberIndex(memberID ShapeID, m idl.Member, fd *fileData) {
+	if m.Index == nil {
+		return
+	}
+	a.pending = append(a.pending, &pendingTrait{
+		target: memberID,
+		name:   "smithy.protocols#idx",
+		value: idl.Node{
+			Kind:   idl.NodeNumber,
+			Num:    strconv.Itoa(*m.Index),
+			Source: m.Source,
+		},
+		source: m.Source,
+		fd:     fd,
+	})
 }
 
 func (a *assembler) addMemberDefault(member *Shape, m idl.Member, fd *fileData) {
@@ -654,29 +701,6 @@ func (a *assembler) addDoc(target ShapeID, doc string, source idl.SourceLocation
 	})
 }
 
-func (a *assembler) inlineTarget(target idl.Target, fd *fileData) *InlineTarget {
-	inline := &InlineTarget{Source: target.Source}
-	var walk func(idl.Target)
-	walk = func(t idl.Target) {
-		switch {
-		case t.InlineList != nil:
-			walk(t.InlineList.Element)
-		case t.InlineMap != nil:
-			walk(t.InlineMap.Key)
-			walk(t.InlineMap.Value)
-		default:
-			if t.ID != "" {
-				inline.Refs = append(inline.Refs, ShapeReference{
-					ID:     a.resolveRef(fd, t.ID),
-					Source: t.Source,
-				})
-			}
-		}
-	}
-	walk(target)
-	return inline
-}
-
 // --- resolution ---------------------------------------------------------------
 
 // resolveRef resolves a relative or absolute shape reference using the rules
@@ -704,7 +728,7 @@ func (a *assembler) resolveRef(fd *fileData, ref string) ShapeID {
 		base = fd.uses[root]
 	default:
 		candidate := NewShapeID(fd.namespace, root)
-		if a.model.HasShape(candidate) {
+		if a.declared[candidate] {
 			base = candidate
 		} else if a.publicPrelude[root] {
 			base = NewShapeID(PreludeNamespace, root)
@@ -738,7 +762,7 @@ func (a *assembler) resolveSyntactic(fd *fileData, raw string) ShapeID {
 	var base ShapeID
 	if fd != nil && fd.uses[root] != (ShapeID{}) {
 		base = fd.uses[root]
-	} else if fd != nil && fd.namespace != "" && a.model.HasShape(NewShapeID(fd.namespace, root)) {
+	} else if fd != nil && fd.namespace != "" && a.declared[NewShapeID(fd.namespace, root)] {
 		base = NewShapeID(fd.namespace, root)
 	} else if a.publicPrelude[root] {
 		base = NewShapeID(PreludeNamespace, root)

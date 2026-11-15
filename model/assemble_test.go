@@ -213,7 +213,7 @@ func TestWeatherJSONIsDeterministic(t *testing.T) {
 func TestValidFixturesAssemble(t *testing.T) {
 	root := filepath.Join(testdataRoot, "loader", "valid")
 	shared := parseFile(t, filepath.Join(testdataRoot, "shared.smithy"))
-	var count, skipped int
+	var count int
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -226,10 +226,6 @@ func TestValidFixturesAssemble(t *testing.T) {
 			return err
 		}
 		file := parseFile(t, path)
-		if file.Version.Major == 2 && file.Version.Minor >= 1 {
-			skipped++
-			return nil
-		}
 		if filepath.Base(path) == "__shared.smithy" {
 			return nil
 		}
@@ -250,5 +246,5 @@ func TestValidFixturesAssemble(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("assembled %d valid fixtures (skipped %d 2.1 fixtures)", count, skipped)
+	t.Logf("assembled %d valid fixtures", count)
 }

@@ -527,8 +527,7 @@ lost and so the remaining conformance gap is explicit.
 The M2 plan already put the JSON AST *loader* out of scope
 ([`02-semantic-model.md`](02-semantic-model.md)). M2 tests compensate by:
 
-- asserting that every non-2.1 `.smithy` fixture assembles without DANGER
-  events;
+- asserting that every `.smithy` fixture assembles without DANGER events;
 - comparing mixin output against the upstream `.flattened.smithy` fixtures,
   which are IDL-in/IDL-out and need no JSON loader;
 - porting the one cross-file input dependency, upstream's `valid/__shared.json`,

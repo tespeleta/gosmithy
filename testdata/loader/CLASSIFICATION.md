@@ -9,16 +9,16 @@ Java repository, limited to `.smithy` files:
 
 The upstream corpus is version-aware. M1 implements the Smithy 2.0 grammar
 plus the 2.1 syntax additions (member indexes, inline collections, and tagged
-string literals). Semantic assembly and validation are M2 work, so invalid
+string literals). Semantic assembly and validation are implemented, so invalid
 fixtures whose expected failure comes from assembly/validation are skipped by
-the parser harness and asserted by the M2 tests instead.
+the parser harness and asserted by the semantic model tests instead.
 
 ## Counts
 
 | Category | Count |
 |---|---:|
 | Valid fixtures | 100 |
-| Valid fixtures using 2.1 syntax/version | 18 |
+| Valid fixtures using 2.1 syntax/version | 19 |
 | Invalid fixtures | 207 |
 | Invalid syntax fixtures checked by M1 | 180 |
 | Invalid semantic fixtures covered by M2 | 27 |
@@ -26,7 +26,7 @@ the parser harness and asserted by the M2 tests instead.
 ## Valid 2.1 fixtures
 
 These files either declare `$version: "2.1"`/`$version: "2"` or use 2.1-only
-syntax. All of them parse with the M1 parser.
+syntax. All of them parse and assemble.
 
 - `valid/2.1/enums.smithy`
 - `valid/2.1/inline-collections-grouping.smithy`
@@ -45,6 +45,7 @@ syntax. All of them parse with the M1 parser.
 - `valid/2/inline-collections.smithy`
 - `valid/2/member-indexes.smithy`
 - `valid/2/tagged-literals.smithy`
+- `valid/expects-br.smithy`
 - `valid/shape-id-does-not-conflict-with-tagged-literals.smithy`
 
 ## Invalid semantic fixtures (matched by M2 assembly/validation)

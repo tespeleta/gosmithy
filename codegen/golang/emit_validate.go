@@ -68,11 +68,6 @@ func (g *generator) emitStructValidator(w *fileWriter, shape *model.Shape) error
 }
 
 func (g *generator) emitMemberValidation(w *fileWriter, container *model.Shape, member *model.Shape) error {
-	if member.Inline != nil {
-		g.diagnosticAt(validation.Danger, member.Source,
-			"Member `%s` uses an inline collection target, which code generation does not support yet", member.ID)
-		return nil
-	}
 	target, ok := g.m.Shape(member.Target)
 	if !ok {
 		g.diagnosticAt(validation.Danger, member.Source,

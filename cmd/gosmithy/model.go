@@ -14,7 +14,7 @@ func runModel(args []string) error {
 	fs.SetOutput(os.Stderr)
 	jsonOut := fs.Bool("json", false, "print the model as debug JSON")
 	includePrelude := fs.Bool("prelude", true, "include prelude shapes in the output")
-	includeProtocols := fs.Bool("protocols", true, "assemble the built-in protocol definitions")
+	includeProtocols := fs.Bool("protocols", true, "assemble the built-in wire protocol definitions")
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "Usage: gosmithy model [flags] <file>...")
 		fs.PrintDefaults()
