@@ -328,6 +328,12 @@ structure In {
     @range(min: 0, max: 10)
     count: Integer
 
+    @range(min: -100000000000000000000000000000, max: 100000000000000000000000000000)
+    big: BigInteger
+
+    @range(min: 0.000000000000000000000000000001, max: 100.5)
+    dec: BigDecimal
+
     @required
     @length(min: 1, max: 5)
     id: String
@@ -342,7 +348,10 @@ structure In {
 	writeFiles(t, dir, files)
 	testSrc := `package types
 
-import "testing"
+import (
+	"math/big"
+	"testing"
+)
 
 func TestOptionalValidationRules(t *testing.T) {
 	ok := In{Id: "i"}
@@ -360,6 +369,23 @@ func TestOptionalValidationRules(t *testing.T) {
 	badCount := In{Id: "i", Count: NewOptional(int32(11))}
 	if err := badCount.Validate(); err == nil {
 		t.Fatal("want count range error")
+	}
+	huge, _ := new(big.Int).SetString("100000000000000000000000000001", 10)
+	badBig := In{Id: "i", Big: NewOptional(huge)}
+	if err := badBig.Validate(); err == nil {
+		t.Fatal("want bigInteger range error")
+	}
+	nullBig := In{Id: "i", Big: NewOptional[*big.Int](nil)}
+	if err := nullBig.Validate(); err != nil {
+		t.Fatalf("nil bigInteger: %v", err)
+	}
+	badDec := In{Id: "i", Dec: NewOptional(MustDecimal("0"))}
+	if err := badDec.Validate(); err == nil {
+		t.Fatal("want bigDecimal range error")
+	}
+	invalidDec := In{Id: "i", Dec: NewOptional(Decimal("bad"))}
+	if err := invalidDec.Validate(); err != nil {
+		t.Fatalf("invalid decimal: %v", err)
 	}
 	emptyId := In{}
 	if err := emptyId.Validate(); err == nil {

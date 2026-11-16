@@ -260,3 +260,47 @@ func TestParseSeverity(t *testing.T) {
 		t.Errorf("ParseSeverity accepted an invalid value")
 	}
 }
+
+func TestBigDecimalRangeBoundsAccepted(t *testing.T) {
+	m := assemble(t, `$version: "2.0"
+namespace example
+
+@range(min: 0.000000000000000000000000000001, max: 100.500000000000000000000000000001)
+bigDecimal Precise
+
+structure In {
+    value: Precise
+}
+`)
+	for _, e := range validation.Validate(m) {
+		if e.Severity == validation.Danger {
+			t.Errorf("unexpected danger: %s", e.String())
+		}
+	}
+}
+
+func TestTraitRangeComparisonIsExact(t *testing.T) {
+	m := assemble(t, `$version: "2.0"
+namespace example
+
+@trait(selector: "string")
+structure limit {
+    @range(min: 10000000000000000000000000000000000000001)
+    value: BigInteger
+}
+
+@limit(value: 10000000000000000000000000000000000000000)
+string S
+`)
+	events := validation.Validate(m)
+	found := false
+	for _, e := range events {
+		if e.ID == validation.ModelInvalidTraitValue && strings.Contains(e.Message, "less than the minimum") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("want exact range violation, got %v", events)
+	}
+}

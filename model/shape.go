@@ -424,6 +424,25 @@ func (s *Shape) Range() (min, max *float64, ok bool) {
 	return floatBound(t.Value, "min"), floatBound(t.Value, "max"), true
 }
 
+// RangeBounds returns the @range constraint bounds as their original number
+// lexemes. A nil bound is absent. Unlike Range, it does not lose precision.
+func (s *Shape) RangeBounds() (min, max *string, ok bool) {
+	t, ok := s.GetTrait(TraitRange)
+	if !ok {
+		return nil, nil, false
+	}
+	return numberBound(t.Value, "min"), numberBound(t.Value, "max"), true
+}
+
+func numberBound(n Node, key string) *string {
+	v, ok := n.Get(key)
+	if !ok || v.Kind != NodeNumber {
+		return nil
+	}
+	out := v.Num
+	return &out
+}
+
 func intBound(n Node, key string) *int {
 	v, ok := n.Get(key)
 	if !ok {

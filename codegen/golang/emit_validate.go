@@ -24,6 +24,60 @@ func (g *generator) emitValidateFile() ([]byte, error) {
 		}
 	}
 
+	if g.needsBigIntRange {
+		body.AddImport("math/big", "")
+		body.Line("")
+		body.Line("func mustBigInt(value string) *big.Int {")
+		body.In()
+		body.Line("v, ok := new(big.Int).SetString(value, 10)")
+		body.Line("if !ok {")
+		body.In()
+		body.Line("panic(%s + value)", quoted("smithy: invalid integer range bound: "))
+		body.Out()
+		body.Line("}")
+		body.Line("return v")
+		body.Out()
+		body.Line("}")
+		body.Line("")
+		body.Line("func bigIntLess(a *big.Int, bound string) bool {")
+		body.In()
+		body.Line("if a == nil {")
+		body.In()
+		body.Line("return false")
+		body.Out()
+		body.Line("}")
+		body.Line("return a.Cmp(mustBigInt(bound)) < 0")
+		body.Out()
+		body.Line("}")
+		body.Line("")
+		body.Line("func bigIntGreater(a *big.Int, bound string) bool {")
+		body.In()
+		body.Line("if a == nil {")
+		body.In()
+		body.Line("return false")
+		body.Out()
+		body.Line("}")
+		body.Line("return a.Cmp(mustBigInt(bound)) > 0")
+		body.Out()
+		body.Line("}")
+	}
+	if g.needsBigDecimalRange {
+		body.Line("")
+		body.Line("func decimalLess(a, b Decimal) bool {")
+		body.In()
+		body.Line("cmp, ok := a.Cmp(b)")
+		body.Line("return ok && cmp < 0")
+		body.Out()
+		body.Line("}")
+		body.Line("")
+		body.Line("func decimalGreater(a, b Decimal) bool {")
+		body.In()
+		body.Line("cmp, ok := a.Cmp(b)")
+		body.Line("return ok && cmp > 0")
+		body.Out()
+		body.Line("}")
+	}
+
 	final := newFileWriter("types", "")
 	final.mergeImports(body)
 	if len(g.patternOrder) > 0 {
@@ -367,7 +421,12 @@ func (g *generator) elementValueExpr(target *model.Shape, expr string, sparse bo
 		return expr
 	}
 	switch target.Type {
-	case model.TypeBlob, model.TypeDocument, model.TypeBigInteger, model.TypeBigDecimal:
+	case model.TypeBlob, model.TypeDocument, model.TypeBigInteger:
+		return expr
+	case model.TypeBigDecimal:
+		if sparse {
+			return "*" + expr
+		}
 		return expr
 	case model.TypeList, model.TypeSet, model.TypeMap:
 		if _, named := g.typeNames[target.ID]; named {
@@ -409,24 +468,36 @@ func (g *generator) emitConstraintChecks(w *fileWriter, target *model.Shape, c c
 	}
 
 	if c.rangeMin != nil {
-		condition, err := rangeCondition(target, expr, *c.rangeMin, true)
+		switch target.Type {
+		case model.TypeBigInteger:
+			g.needsBigIntRange = true
+		case model.TypeBigDecimal:
+			g.needsBigDecimalRange = true
+		}
+		condition, err := rangeCondition(target, expr, c.rangeMin, true)
 		if err != nil {
 			return fmt.Errorf("golang: @range on `%s`: %w", target.ID, err)
 		}
 		w.Line("if %s {", condition)
 		w.In()
-		w.Line("errs.Add(%s, %s)", pathExpr, quoted(rangeMessage(target, *c.rangeMin, true)))
+		w.Line("errs.Add(%s, %s)", pathExpr, quoted(rangeMessage(target, c.rangeMin, true)))
 		w.Out()
 		w.Line("}")
 	}
 	if c.rangeMax != nil {
-		condition, err := rangeCondition(target, expr, *c.rangeMax, false)
+		switch target.Type {
+		case model.TypeBigInteger:
+			g.needsBigIntRange = true
+		case model.TypeBigDecimal:
+			g.needsBigDecimalRange = true
+		}
+		condition, err := rangeCondition(target, expr, c.rangeMax, false)
 		if err != nil {
 			return fmt.Errorf("golang: @range on `%s`: %w", target.ID, err)
 		}
 		w.Line("if %s {", condition)
 		w.In()
-		w.Line("errs.Add(%s, %s)", pathExpr, quoted(rangeMessage(target, *c.rangeMax, false)))
+		w.Line("errs.Add(%s, %s)", pathExpr, quoted(rangeMessage(target, c.rangeMax, false)))
 		w.Out()
 		w.Line("}")
 	}

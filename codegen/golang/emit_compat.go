@@ -867,6 +867,10 @@ func (g *generator) emitDecimalFile() ([]byte, error) {
 	w.Line("// String returns the stored decimal literal.")
 	w.Line("func (d Decimal) String() string { return string(d) }")
 	w.Line("")
+	for _, line := range strings.Split(decimalCmpSource, "\n") {
+		w.Line("%s", line)
+	}
+	w.Line("")
 	w.Line("// MarshalJSON emits the decimal as a bare JSON number.")
 	w.Line("func (d Decimal) MarshalJSON() ([]byte, error) {")
 	w.In()
@@ -1090,3 +1094,149 @@ func (g *generator) emitRelaxedBoolFile() ([]byte, error) {
 	w.Line("func (b RelaxedBool) Value() bool { return bool(b) }")
 	return w.Render()
 }
+
+// decimalCmpSource is emitted into types/decimal.go. It keeps the raw literal
+// as the wire representation and parses on demand for exact comparison.
+const decimalCmpSource = `// Cmp compares d and other numerically. ok is false when either value is not
+// a valid decimal literal.
+func (d Decimal) Cmp(other Decimal) (int, bool) {
+	an, ac, ae, aok := decimalParts(string(d))
+	bn, bc, be, bok := decimalParts(string(other))
+	if !aok || !bok {
+		return 0, false
+	}
+	as := decimalSign(an, ac)
+	bs := decimalSign(bn, bc)
+	if as != bs {
+		if as < bs {
+			return -1, true
+		}
+		return 1, true
+	}
+	if as == 0 {
+		return 0, true
+	}
+	// Compare the position of the most significant digit before scaling. This
+	// keeps values such as 1e999999999 from allocating 10^999999999.
+	aScale := new(big.Int).Add(ae, big.NewInt(int64(len(ac.String()))))
+	bScale := new(big.Int).Add(be, big.NewInt(int64(len(bc.String()))))
+	if scaleCmp := aScale.Cmp(bScale); scaleCmp != 0 {
+		cmp := scaleCmp
+		if as < 0 {
+			cmp = -cmp
+		}
+		return cmp, true
+	}
+	// With equal scales the exponent difference is bounded by the coefficient
+	// lengths, so this multiplication is proportional to the input size.
+	diff := new(big.Int).Sub(ae, be)
+	var cmp int
+	switch diff.Sign() {
+	case 1:
+		cmp = new(big.Int).Mul(ac, decimalPow10(diff.Int64())).Cmp(bc)
+	case -1:
+		cmp = ac.Cmp(new(big.Int).Mul(bc, decimalPow10(new(big.Int).Neg(diff).Int64())))
+	default:
+		cmp = ac.Cmp(bc)
+	}
+	if as < 0 {
+		cmp = -cmp
+	}
+	return cmp, true
+}
+
+func decimalSign(negative bool, coefficient *big.Int) int {
+	if coefficient.Sign() == 0 {
+		return 0
+	}
+	if negative {
+		return -1
+	}
+	return 1
+}
+
+func decimalPow10(n int64) *big.Int {
+	return new(big.Int).Exp(big.NewInt(10), big.NewInt(n), nil)
+}
+
+// decimalParts parses a JSON number literal into a sign, a non-negative
+// coefficient, and a base-10 exponent.
+func decimalParts(value string) (negative bool, coefficient *big.Int, exponent *big.Int, ok bool) {
+	exponent = new(big.Int)
+	i := 0
+	if i < len(value) && value[i] == '-' {
+		negative = true
+		i++
+	}
+	if i >= len(value) {
+		return false, nil, nil, false
+	}
+	digits := make([]byte, 0, len(value))
+	switch {
+	case value[i] == '0':
+		digits = append(digits, value[i])
+		i++
+	case value[i] >= '1' && value[i] <= '9':
+		for i < len(value) && isASCIIDigit(value[i]) {
+			digits = append(digits, value[i])
+			i++
+		}
+	default:
+		return false, nil, nil, false
+	}
+	fractionDigits := 0
+	if i < len(value) && value[i] == '.' {
+		i++
+		if i >= len(value) || !isASCIIDigit(value[i]) {
+			return false, nil, nil, false
+		}
+		for i < len(value) && isASCIIDigit(value[i]) {
+			digits = append(digits, value[i])
+			fractionDigits++
+			i++
+		}
+	}
+	if i < len(value) && (value[i] == 'e' || value[i] == 'E') {
+		i++
+		exponentNegative := false
+		if i < len(value) && (value[i] == '+' || value[i] == '-') {
+			exponentNegative = value[i] == '-'
+			i++
+		}
+		start := i
+		for i < len(value) && isASCIIDigit(value[i]) {
+			i++
+		}
+		if start == i {
+			return false, nil, nil, false
+		}
+		parsed, ok := new(big.Int).SetString(value[start:i], 10)
+		if !ok {
+			return false, nil, nil, false
+		}
+		if exponentNegative {
+			parsed.Neg(parsed)
+		}
+		exponent = parsed
+	}
+	if i != len(value) {
+		return false, nil, nil, false
+	}
+	if fractionDigits > 0 {
+		exponent.Sub(exponent, big.NewInt(int64(fractionDigits)))
+	}
+	if len(digits) <= 18 {
+		parsed, err := strconv.ParseUint(string(digits), 10, 64)
+		if err != nil {
+			return false, nil, nil, false
+		}
+		coefficient = new(big.Int).SetUint64(parsed)
+	} else {
+		coefficient = new(big.Int)
+		if _, ok := coefficient.SetString(string(digits), 10); !ok {
+			return false, nil, nil, false
+		}
+	}
+	return negative, coefficient, exponent, true
+}
+`

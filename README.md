@@ -687,9 +687,9 @@ short version:
   endpoint traits, authentication traits, and most behavior traits are not
   modeled beyond their data.
 - **Go model limits.** `@default` and `@clientOptional` are not applied; union
-  values and map keys are not validated; `@range` on `bigInteger`/`bigDecimal`
-  is not generated; `@pattern` uses Go's RE2 syntax; validators do not detect
-  cycles; client input and server output are not validated.
+  values and map keys are not validated; `@pattern` uses Go's RE2 syntax;
+  validators do not detect cycles; client input and server output are not
+  validated.
 - **HTTP binding limits.** Literal query strings in URIs and greedy labels are
   rejected; ambiguous routes are rejected instead of resolved by specificity;
   restricted headers are not diagnosed; error structures do not support

@@ -5,6 +5,7 @@ package types
 import (
 	"example.com/codegen/internal/smithy"
 	"fmt"
+	"math/big"
 	"reflect"
 	"regexp"
 	"unicode/utf8"
@@ -23,6 +24,97 @@ func (v Attributes) Validate() error {
 }
 
 func (v Attributes) validateContents(errs *smithy.ValidationErrors, prefix string) {
+}
+
+// Validate checks the constraints of BigDecimals.
+func (v BigDecimals) Validate() error {
+	var errs smithy.ValidationErrors
+	v.validateContents(&errs, "")
+	return errs.Err()
+}
+
+func (v BigDecimals) validateContents(errs *smithy.ValidationErrors, prefix string) {
+	for k, elem := range v {
+		path := fmt.Sprintf("%s[%v]", prefix, k)
+		if decimalLess(elem, Decimal("0.000000000000000000000000000001")) {
+			errs.Add(path, "must be greater than or equal to 0.000000000000000000000000000001")
+		}
+		if decimalGreater(elem, Decimal("100.500000000000000000000000000001")) {
+			errs.Add(path, "must be less than or equal to 100.500000000000000000000000000001")
+		}
+	}
+}
+
+// Validate checks the constraints of BigNumbers.
+func (v *BigNumbers) Validate() error {
+	if v == nil {
+		return nil
+	}
+	var errs smithy.ValidationErrors
+	if v.Huge != nil {
+		if bigIntLess(v.Huge, "-123456789012345678901234567890") {
+			errs.Add("huge", "must be greater than or equal to -123456789012345678901234567890")
+		}
+		if bigIntGreater(v.Huge, "123456789012345678901234567890") {
+			errs.Add("huge", "must be less than or equal to 123456789012345678901234567890")
+		}
+	}
+	if v.Precise != nil {
+		if decimalLess(*v.Precise, Decimal("0.000000000000000000000000000001")) {
+			errs.Add("precise", "must be greater than or equal to 0.000000000000000000000000000001")
+		}
+		if decimalGreater(*v.Precise, Decimal("100.500000000000000000000000000001")) {
+			errs.Add("precise", "must be less than or equal to 100.500000000000000000000000000001")
+		}
+	}
+	if v.Limited != nil {
+		if bigIntLess(v.Limited, "10") {
+			errs.Add("limited", "must be greater than or equal to 10")
+		}
+		if bigIntGreater(v.Limited, "20") {
+			errs.Add("limited", "must be less than or equal to 20")
+		}
+	}
+	if v.Overridden != nil {
+		if bigIntLess(v.Overridden, "1") {
+			errs.Add("overridden", "must be greater than or equal to 1")
+		}
+	}
+	if v.OverriddenDecimal != nil {
+		if decimalGreater(*v.OverriddenDecimal, Decimal("1.5")) {
+			errs.Add("overriddenDecimal", "must be less than or equal to 1.5")
+		}
+	}
+	if v.RequiredPrecise == nil {
+		errs.Add("requiredPrecise", "is required")
+	} else {
+		if decimalLess(*v.RequiredPrecise, Decimal("0.000000000000000000000000000001")) {
+			errs.Add("requiredPrecise", "must be greater than or equal to 0.000000000000000000000000000001")
+		}
+		if decimalGreater(*v.RequiredPrecise, Decimal("100.500000000000000000000000000001")) {
+			errs.Add("requiredPrecise", "must be less than or equal to 100.500000000000000000000000000001")
+		}
+	}
+	if v.RequiredHuge == nil {
+		errs.Add("requiredHuge", "is required")
+	} else {
+		if bigIntLess(v.RequiredHuge, "-123456789012345678901234567890") {
+			errs.Add("requiredHuge", "must be greater than or equal to -123456789012345678901234567890")
+		}
+		if bigIntGreater(v.RequiredHuge, "123456789012345678901234567890") {
+			errs.Add("requiredHuge", "must be less than or equal to 123456789012345678901234567890")
+		}
+	}
+	if v.SparseInts != nil {
+		errs.AddNested("sparseInts", v.SparseInts.Validate())
+	}
+	if v.SparseDecimals != nil {
+		errs.AddNested("sparseDecimals", v.SparseDecimals.Validate())
+	}
+	if v.Decimals != nil {
+		errs.AddNested("decimals", v.Decimals.Validate())
+	}
+	return errs.Err()
 }
 
 // Validate checks the constraints of Circle.
@@ -79,6 +171,9 @@ func (v *GetThingOutput) Validate() error {
 	}
 	if v.Scalars != nil {
 		errs.AddNested("scalars", v.Scalars.Validate())
+	}
+	if v.BigNumbers != nil {
+		errs.AddNested("bigNumbers", v.BigNumbers.Validate())
 	}
 	return errs.Err()
 }
@@ -244,6 +339,50 @@ func (v Scores) validateContents(errs *smithy.ValidationErrors, prefix string) {
 		}
 		if int64(elem) > 10 {
 			errs.Add(path, "must be less than or equal to 10")
+		}
+	}
+}
+
+// Validate checks the constraints of SparseBigDecimals.
+func (v SparseBigDecimals) Validate() error {
+	var errs smithy.ValidationErrors
+	v.validateContents(&errs, "")
+	return errs.Err()
+}
+
+func (v SparseBigDecimals) validateContents(errs *smithy.ValidationErrors, prefix string) {
+	for i := range v {
+		elem := v[i]
+		path := fmt.Sprintf("%s[%d]", prefix, i)
+		if elem != nil {
+			if decimalLess(*elem, Decimal("0.000000000000000000000000000001")) {
+				errs.Add(path, "must be greater than or equal to 0.000000000000000000000000000001")
+			}
+			if decimalGreater(*elem, Decimal("100.500000000000000000000000000001")) {
+				errs.Add(path, "must be less than or equal to 100.500000000000000000000000000001")
+			}
+		}
+	}
+}
+
+// Validate checks the constraints of SparseBigIntegers.
+func (v SparseBigIntegers) Validate() error {
+	var errs smithy.ValidationErrors
+	v.validateContents(&errs, "")
+	return errs.Err()
+}
+
+func (v SparseBigIntegers) validateContents(errs *smithy.ValidationErrors, prefix string) {
+	for i := range v {
+		elem := v[i]
+		path := fmt.Sprintf("%s[%d]", prefix, i)
+		if elem != nil {
+			if bigIntLess(elem, "-123456789012345678901234567890") {
+				errs.Add(path, "must be greater than or equal to -123456789012345678901234567890")
+			}
+			if bigIntGreater(elem, "123456789012345678901234567890") {
+				errs.Add(path, "must be less than or equal to 123456789012345678901234567890")
+			}
 		}
 	}
 }
@@ -484,4 +623,36 @@ func (v *Unit) Validate() error {
 	}
 	var errs smithy.ValidationErrors
 	return errs.Err()
+}
+
+func mustBigInt(value string) *big.Int {
+	v, ok := new(big.Int).SetString(value, 10)
+	if !ok {
+		panic("smithy: invalid integer range bound: " + value)
+	}
+	return v
+}
+
+func bigIntLess(a *big.Int, bound string) bool {
+	if a == nil {
+		return false
+	}
+	return a.Cmp(mustBigInt(bound)) < 0
+}
+
+func bigIntGreater(a *big.Int, bound string) bool {
+	if a == nil {
+		return false
+	}
+	return a.Cmp(mustBigInt(bound)) > 0
+}
+
+func decimalLess(a, b Decimal) bool {
+	cmp, ok := a.Cmp(b)
+	return ok && cmp < 0
+}
+
+func decimalGreater(a, b Decimal) bool {
+	cmp, ok := a.Cmp(b)
+	return ok && cmp > 0
 }

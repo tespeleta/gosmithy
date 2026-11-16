@@ -60,6 +60,52 @@ string Title
 @range(min: 0, max: 100)
 integer Percentage
 
+@range(min: -123456789012345678901234567890, max: 123456789012345678901234567890)
+bigInteger HugeInteger
+
+@range(min: 0.000000000000000000000000000001, max: 100.500000000000000000000000000001)
+bigDecimal PreciseDecimal
+
+@range(min: 10, max: 20)
+bigInteger LimitedBigInteger
+
+@sparse
+list SparseBigIntegers {
+    member: HugeInteger
+}
+
+@sparse
+list SparseBigDecimals {
+    member: PreciseDecimal
+}
+
+map BigDecimals {
+    key: String
+    value: PreciseDecimal
+}
+
+structure BigNumbers {
+    huge: HugeInteger
+    precise: PreciseDecimal
+    limited: LimitedBigInteger
+
+    @range(min: 1)
+    overridden: LimitedBigInteger
+
+    @range(max: 1.5)
+    overriddenDecimal: PreciseDecimal
+
+    @required
+    requiredPrecise: PreciseDecimal
+
+    @required
+    requiredHuge: HugeInteger
+
+    sparseInts: SparseBigIntegers
+    sparseDecimals: SparseBigDecimals
+    decimals: BigDecimals
+}
+
 @pattern("^[a-z0-9-]+$")
 @length(min: 1, max: 8)
 string Tag
@@ -232,6 +278,7 @@ structure GetThingOutput {
     index: ThingMap
     old: OldThing
     scalars: Scalars
+    bigNumbers: BigNumbers
 }
 
 structure ListThingsInput {

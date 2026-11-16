@@ -61,6 +61,33 @@ structure In {
 		substr: "range",
 	},
 	{
+		// float64 would round this bound to 1.0 and accept it.
+		name: "fractional_range_on_big_integer",
+		source: `$version: "2.0"
+namespace tdd
+
+@range(min: 1.0000000000000000000000000001)
+bigInteger Bad
+
+structure In {
+    bad: Bad
+}`,
+		substr: "fractional",
+	},
+	{
+		name: "range_min_greater_than_max",
+		source: `$version: "2.0"
+namespace tdd
+
+@range(min: 10, max: 1)
+integer Bad
+
+structure In {
+    bad: Bad
+}`,
+		substr: "greater than",
+	},
+	{
 		name: "duplicate_json_name",
 		source: `$version: "2.0"
 namespace tdd

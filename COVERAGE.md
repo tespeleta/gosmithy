@@ -266,8 +266,8 @@ specification.
         preserves the JSON number literal instead of converting to a binary
         float. Strict input accepts a JSON number only; quoted decimals are
         accepted under `@relaxedInput`.
-  - [ ] `@range` is not generated for bigInteger or bigDecimal (silently
-        skipped).
+  - [x] `@range` generation for bigInteger and bigDecimal, with exact bounds
+        and raw-literal comparison.
   - [ ] String-encoded bigInteger/bigDecimal trait values are not accepted by
         the generic trait-value validator.
 - [x] **timestamp**
@@ -577,9 +577,10 @@ specification.
 - [x] **`range` trait**
   - [x] Parsed and exposed as min/max.
   - [x] Generated validation for byte/short/integer/long/float/double.
+  - [x] Generated validation for bigInteger/bigDecimal with exact bounds.
   - [x] Member-level override.
   - [x] Fractional bounds on integral shapes produce `Model.InvalidTraitValue`.
-  - [ ] `@range` on bigInteger/bigDecimal is not generated.
+  - [x] `min` greater than `max` produces `Model.InvalidTraitValue`.
 - [x] **`uniqueItems` trait**
   - [x] Parsed and applied to list/set targets.
   - [x] Generated O(n²) validation using Go value equality
@@ -1533,7 +1534,8 @@ project includes what the generator can emit.
       are plain values and `Optional` presence is checked with `HasValue`;
       empty values are not absent.
 - [x] `@length` for strings (code points), blobs (bytes), and collections.
-- [x] `@range` for integers and floats; wide bounds do not overflow.
+- [x] `@range` for integers, floats, bigInteger, and bigDecimal; wide bounds
+      do not overflow.
 - [x] `@pattern` with Go RE2 and clear generation errors.
 - [x] `@uniqueItems` for list/set using Go value equality.
 - [x] Nested validation with paths such as `a.b`, `tags[0]`, and `index[key]`.
@@ -1541,7 +1543,7 @@ project includes what the generator can emit.
 - [x] Sparse nil values are skipped.
 - [ ] Union value validation.
 - [ ] Map-key validation.
-- [ ] `@range` on bigInteger/bigDecimal.
+- [x] `@range` on bigInteger/bigDecimal.
 - [ ] `@default`/`@clientOptional` validation effects.
 - [ ] Enum/intEnum membership validation.
 - [ ] Cycle detection or recursion-depth guards (callers must not build cyclic

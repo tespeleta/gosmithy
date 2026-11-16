@@ -4,7 +4,7 @@
 //
 // Member presence is represented by Optional, pointers, or nil slices/maps. Constraints are enforced by the Validate methods; callers should not build cyclic values. Required plain scalars are not presence-checked.
 //
-// Known limitations: @default and @clientOptional are not applied, @length counts Unicode code points for strings and bytes for blobs, @pattern uses Go's RE2 regular expressions rather than ECMAScript, and @range on bigInteger/bigDecimal is not generated.
+// Known limitations: @default and @clientOptional are not applied, @length counts Unicode code points for strings and bytes for blobs, and @pattern uses Go's RE2 regular expressions rather than ECMAScript.
 package types
 
 import (
@@ -13,6 +13,21 @@ import (
 )
 
 type Attributes map[string]string
+
+type BigDecimals map[string]Decimal
+
+type BigNumbers struct {
+	Huge              *big.Int          `json:"huge,omitempty"`
+	Precise           *Decimal          `json:"precise,omitempty"`
+	Limited           *big.Int          `json:"limited,omitempty"`
+	Overridden        *big.Int          `json:"overridden,omitempty"`
+	OverriddenDecimal *Decimal          `json:"overriddenDecimal,omitempty"`
+	RequiredPrecise   *Decimal          `json:"requiredPrecise,omitempty"`
+	RequiredHuge      *big.Int          `json:"requiredHuge,omitempty"`
+	SparseInts        SparseBigIntegers `json:"sparseInts,omitempty"`
+	SparseDecimals    SparseBigDecimals `json:"sparseDecimals,omitempty"`
+	Decimals          BigDecimals       `json:"decimals,omitempty"`
+}
 
 type Circle struct {
 	Radius *float64 `json:"radius,omitempty"`
@@ -23,11 +38,12 @@ type GetThingInput struct {
 }
 
 type GetThingOutput struct {
-	Thing   *Thing    `json:"thing,omitempty"`
-	Related ThingList `json:"related,omitempty"`
-	Index   ThingMap  `json:"index,omitempty"`
-	Old     *OldThing `json:"old,omitempty"`
-	Scalars *Scalars  `json:"scalars,omitempty"`
+	Thing      *Thing      `json:"thing,omitempty"`
+	Related    ThingList   `json:"related,omitempty"`
+	Index      ThingMap    `json:"index,omitempty"`
+	Old        *OldThing   `json:"old,omitempty"`
+	Scalars    *Scalars    `json:"scalars,omitempty"`
+	BigNumbers *BigNumbers `json:"bigNumbers,omitempty"`
 }
 
 type ListThingsInput struct {
@@ -80,6 +96,10 @@ type Scalars struct {
 }
 
 type Scores []int32
+
+type SparseBigDecimals []*Decimal
+
+type SparseBigIntegers []*big.Int
 
 type Square struct {
 	Side *float64 `json:"side,omitempty"`

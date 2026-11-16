@@ -118,6 +118,11 @@ type generator struct {
 	needsRelaxedNumbers bool
 	needsOptional       bool
 
+	// needsBigIntRange and needsBigDecimalRange record generated @range checks
+	// that require package-level comparison helpers.
+	needsBigIntRange     bool
+	needsBigDecimalRange bool
+
 	useOptionals bool
 }
 

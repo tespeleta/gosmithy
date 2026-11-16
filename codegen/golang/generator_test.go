@@ -475,6 +475,14 @@ func ptrDecimal(v string) *Decimal  { d := MustDecimal(v); return &d }
 func ptrInt32(v int32) *int32       { return &v }
 func ptrKind(v ThingKind) *ThingKind { return &v }
 
+func ptrBigInt(v string) *big.Int {
+	n, ok := new(big.Int).SetString(v, 10)
+	if !ok {
+		panic("invalid big.Int test value: " + v)
+	}
+	return n
+}
+
 func allErrorText(err error) string {
 	switch e := err.(type) {
 	case smithy.ValidationErrors:
@@ -498,6 +506,37 @@ func failUnlessContains(t *testing.T, err error, want string) {
 	}
 	if !strings.Contains(allErrorText(err), want) {
 		t.Fatalf("error %q does not contain %q", err, want)
+	}
+}
+
+func TestDecimalCmp(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want int
+		ok   bool
+	}{
+		{"1.0", "1e0", 0, true},
+		{"1.2300", "1.23", 0, true},
+		{"100.500000000000000000000000000001", "100.500000000000000000000000000002", -1, true},
+		{"-1", "1", -1, true},
+		{"0.001", "1e-3", 0, true},
+		{"1000", "1e3", 0, true},
+		{"0.000", "0", 0, true},
+		{"-0", "0", 0, true},
+		{"1e99999999999999999999", "1", 1, true},
+		{"1e-99999999999999999999", "1", -1, true},
+		{"1e99999999999999999999", "1e99999999999999999998", 1, true},
+		{"-1e99999999999999999999", "-1e99999999999999999998", -1, true},
+		{"", "1", 0, false},
+		{"bad", "1", 0, false},
+		{"01", "1", 0, false},
+		{"1.", "1", 0, false},
+	}
+	for _, c := range cases {
+		got, ok := Decimal(c.a).Cmp(Decimal(c.b))
+		if ok != c.ok || (ok && got != c.want) {
+			t.Errorf("Decimal(%q).Cmp(Decimal(%q)) = %d, %v; want %d, %v", c.a, c.b, got, ok, c.want, c.ok)
+		}
 	}
 }
 
@@ -618,6 +657,129 @@ func TestErrorTypes(t *testing.T) {
 	if got := (&ValidationFailure{}).ErrorFault(); got != "server" {
 		t.Errorf("server ErrorFault() = %q", got)
 	}
+}
+
+func validBigNumbers() *BigNumbers {
+	return &BigNumbers{
+		RequiredPrecise: ptrDecimal("1"),
+		RequiredHuge:    big.NewInt(1),
+	}
+}
+
+func TestBigIntegerRanges(t *testing.T) {
+	in := validBigNumbers()
+	if err := in.Validate(); err != nil {
+		t.Fatalf("valid BigNumbers: %v", err)
+	}
+
+	in = validBigNumbers()
+	in.Huge = ptrBigInt("-123456789012345678901234567891")
+	failUnlessContains(t, in.Validate(), "huge: must be greater than or equal to -123456789012345678901234567890")
+
+	in = validBigNumbers()
+	in.Huge = ptrBigInt("123456789012345678901234567891")
+	failUnlessContains(t, in.Validate(), "huge: must be less than or equal to 123456789012345678901234567890")
+
+	in = validBigNumbers()
+	in.Huge = ptrBigInt("-123456789012345678901234567890")
+	if err := in.Validate(); err != nil {
+		t.Fatalf("huge minimum rejected: %v", err)
+	}
+	in.Huge = ptrBigInt("123456789012345678901234567890")
+	if err := in.Validate(); err != nil {
+		t.Fatalf("huge maximum rejected: %v", err)
+	}
+
+	in = validBigNumbers()
+	in.Limited = ptrBigInt("9")
+	failUnlessContains(t, in.Validate(), "limited: must be greater than or equal to 10")
+	in.Limited = ptrBigInt("21")
+	failUnlessContains(t, in.Validate(), "limited: must be less than or equal to 20")
+	in.Limited = ptrBigInt("10")
+	if err := in.Validate(); err != nil {
+		t.Fatalf("limited minimum rejected: %v", err)
+	}
+	in.Limited = ptrBigInt("20")
+	if err := in.Validate(); err != nil {
+		t.Fatalf("limited maximum rejected: %v", err)
+	}
+
+	in = validBigNumbers()
+	in.Overridden = ptrBigInt("5")
+	if err := in.Validate(); err != nil {
+		t.Fatalf("member range override rejected: %v", err)
+	}
+	in.Overridden = ptrBigInt("0")
+	failUnlessContains(t, in.Validate(), "overridden: must be greater than or equal to 1")
+}
+
+func TestBigDecimalRanges(t *testing.T) {
+	in := validBigNumbers()
+	in.Precise = ptrDecimal("0")
+	failUnlessContains(t, in.Validate(), "precise: must be greater than or equal to 0.000000000000000000000000000001")
+
+	in.Precise = ptrDecimal("0.000000000000000000000000000001")
+	if err := in.Validate(); err != nil {
+		t.Fatalf("precise minimum rejected: %v", err)
+	}
+
+	in.Precise = ptrDecimal("100.500000000000000000000000000001")
+	if err := in.Validate(); err != nil {
+		t.Fatalf("precise maximum rejected: %v", err)
+	}
+
+	in.Precise = ptrDecimal("100.500000000000000000000000000002")
+	failUnlessContains(t, in.Validate(), "precise: must be less than or equal to 100.500000000000000000000000000001")
+
+	in.Precise = ptrDecimal("1e99999999999999999999")
+	failUnlessContains(t, in.Validate(), "precise: must be less than or equal to 100.500000000000000000000000000001")
+
+	in.Precise = ptrDecimal("1e-99999999999999999999")
+	failUnlessContains(t, in.Validate(), "precise: must be greater than or equal to 0.000000000000000000000000000001")
+
+	in = validBigNumbers()
+	in.OverriddenDecimal = ptrDecimal("2")
+	failUnlessContains(t, in.Validate(), "overriddenDecimal: must be less than or equal to 1.5")
+	in.OverriddenDecimal = ptrDecimal("1.5")
+	if err := in.Validate(); err != nil {
+		t.Fatalf("overriddenDecimal maximum rejected: %v", err)
+	}
+
+	invalid := Decimal("not-a-number")
+	in = validBigNumbers()
+	in.Precise = &invalid
+	if err := in.Validate(); err != nil {
+		t.Fatalf("invalid decimal should not panic or fail range validation: %v", err)
+	}
+}
+
+func TestBigRangeCollections(t *testing.T) {
+	in := validBigNumbers()
+	in.SparseInts = SparseBigIntegers{nil, ptrBigInt("123456789012345678901234567891")}
+	err := in.Validate()
+	failUnlessContains(t, err, "sparseInts[1]: must be less than or equal to 123456789012345678901234567890")
+	if strings.Contains(err.Error(), "sparseInts[0]") {
+		t.Fatalf("nil sparse bigInteger was validated: %v", err)
+	}
+
+	in = validBigNumbers()
+	in.SparseDecimals = SparseBigDecimals{nil, ptrDecimal("100.500000000000000000000000000002")}
+	err = in.Validate()
+	failUnlessContains(t, err, "sparseDecimals[1]: must be less than or equal to 100.500000000000000000000000000001")
+	if strings.Contains(err.Error(), "sparseDecimals[0]") {
+		t.Fatalf("nil sparse bigDecimal was validated: %v", err)
+	}
+
+	in = validBigNumbers()
+	in.Decimals = BigDecimals{"a": MustDecimal("0")}
+	failUnlessContains(t, in.Validate(), "decimals[a]: must be greater than or equal to 0.000000000000000000000000000001")
+}
+
+func TestBigRequiredness(t *testing.T) {
+	var in BigNumbers
+	err := in.Validate()
+	failUnlessContains(t, err, "requiredPrecise: is required")
+	failUnlessContains(t, err, "requiredHuge: is required")
 }
 
 func TestScalarTypes(t *testing.T) {

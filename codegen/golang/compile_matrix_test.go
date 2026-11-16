@@ -252,6 +252,36 @@ structure In {
 			has("types/validate.go", "must be greater than or equal to 200"),
 		},
 	},
+	{
+		name: "range_big_integer",
+		source: matrixModel(`@range(min: -123456789012345678901234567890, max: 123456789012345678901234567890)
+bigInteger Huge
+
+structure In {
+    h: Huge
+}`, matrixOpInput),
+		assert: []shapeAssertion{
+			has("types/types.go", "H *big.Int `json:\"h,omitempty\"`"),
+			has("types/validate.go", `if bigIntLess(v.H, "-123456789012345678901234567890") {`),
+			has("types/validate.go", `if bigIntGreater(v.H, "123456789012345678901234567890") {`),
+			has("types/validate.go", "must be greater than or equal to -123456789012345678901234567890"),
+			has("types/validate.go", "must be less than or equal to 123456789012345678901234567890"),
+		},
+	},
+	{
+		name: "range_big_decimal",
+		source: matrixModel(`@range(min: 0.000000000000000000000000000001, max: 100.500000000000000000000000000001)
+bigDecimal Precise
+
+structure In {
+    p: Precise
+}`, matrixOpInput),
+		assert: []shapeAssertion{
+			has("types/types.go", "P *Decimal `json:\"p,omitempty\"`"),
+			has("types/validate.go", `if decimalLess(*v.P, Decimal("0.000000000000000000000000000001")) {`),
+			has("types/validate.go", `if decimalGreater(*v.P, Decimal("100.500000000000000000000000000001")) {`),
+		},
+	},
 
 	// Supported payload/timestamp shapes. These only need to compile here; the
 	// wire contract is asserted by TestProtocolContracts.
@@ -496,6 +526,12 @@ integer Wide
 @range(min: 200)
 byte Narrow
 
+@range(min: -123456789012345678901234567890, max: 123456789012345678901234567890)
+bigInteger Huge
+
+@range(min: 0.000000000000000000000000000001, max: 100.500000000000000000000000000001)
+bigDecimal Precise
+
 list Times {
     @timestampFormat("epoch-seconds")
     member: Timestamp
@@ -578,6 +614,8 @@ operation SparseOp {
 structure RangeIn {
     wide: Wide
     narrow: Narrow
+    huge: Huge
+    precise: Precise
 }
 
 @http(method: "POST", uri: "/range")

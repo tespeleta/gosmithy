@@ -14,8 +14,8 @@ func (g *generator) emitTypesFile() ([]byte, error) {
 			"enforced by the Validate methods; callers should not build cyclic values. Required plain "+
 			"scalars are not presence-checked.\n\n"+
 			"Known limitations: @default and @clientOptional are not applied, @length counts Unicode "+
-			"code points for strings and bytes for blobs, @pattern uses Go's RE2 regular "+
-			"expressions rather than ECMAScript, and @range on bigInteger/bigDecimal is not generated.",
+			"code points for strings and bytes for blobs, and @pattern uses Go's RE2 regular "+
+			"expressions rather than ECMAScript.",
 		g.service.ID,
 	)
 	w := newFileWriter("types", doc)

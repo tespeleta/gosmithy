@@ -3,18 +3,28 @@ package golang
 import (
 	"fmt"
 	"math"
+	"math/big"
 	"strconv"
 
 	"github.com/tespeleta/gosmithy/model"
 )
+
+// rangeBound is one @range bound. text keeps the original Smithy number
+// lexeme, which is required for bigInteger/bigDecimal; value is the parsed
+// float used by byte/short/integer/long/float/double.
+type rangeBound struct {
+	text     string
+	value    float64
+	hasValue bool
+}
 
 // constraints is the effective set of constraints for a member or shape.
 // Member constraints override target shape constraints, per Smithy semantics.
 type constraints struct {
 	lengthMin   *int
 	lengthMax   *int
-	rangeMin    *float64
-	rangeMax    *float64
+	rangeMin    *rangeBound
+	rangeMax    *rangeBound
 	pattern     *string
 	uniqueItems bool
 }
@@ -46,16 +56,38 @@ func overrideLength(member, target *model.Shape) (min, max *int) {
 	return nil, nil
 }
 
-func overrideRange(member, target *model.Shape) (min, max *float64) {
-	if member != nil && member.HasTrait(model.TraitRange) {
-		min, max, _ = member.Range()
-		return min, max
+func overrideRange(member, target *model.Shape) (min, max *rangeBound) {
+	var shape *model.Shape
+	switch {
+	case member != nil && member.HasTrait(model.TraitRange):
+		shape = member
+	case target != nil && target.HasTrait(model.TraitRange):
+		shape = target
+	default:
+		return nil, nil
 	}
-	if target != nil && target.HasTrait(model.TraitRange) {
-		min, max, _ = target.Range()
-		return min, max
+	minFloat, maxFloat, _ := shape.Range()
+	minText, maxText, _ := shape.RangeBounds()
+	resolved := target
+	if resolved == nil {
+		resolved = member
 	}
-	return nil, nil
+	return newRangeBound(resolved, minText, minFloat), newRangeBound(resolved, maxText, maxFloat)
+}
+
+func newRangeBound(target *model.Shape, text *string, value *float64) *rangeBound {
+	if text == nil {
+		return nil
+	}
+	if target != nil && (target.Type == model.TypeBigInteger || target.Type == model.TypeBigDecimal) {
+		return &rangeBound{text: *text}
+	}
+	// Preserve the previous behavior for non-Big types: a bound that cannot be
+	// represented as a float is silently skipped by the generator.
+	if value == nil {
+		return nil
+	}
+	return &rangeBound{text: *text, value: *value, hasValue: true}
 }
 
 func overridePattern(member, target *model.Shape) *string {
@@ -90,7 +122,7 @@ func (c constraints) hasApplicable(target *model.Shape) bool {
 	case model.TypeMap:
 		return c.lengthMin != nil || c.lengthMax != nil
 	case model.TypeByte, model.TypeShort, model.TypeInteger, model.TypeLong,
-		model.TypeFloat, model.TypeDouble:
+		model.TypeFloat, model.TypeDouble, model.TypeBigInteger, model.TypeBigDecimal:
 		return c.rangeMin != nil || c.rangeMax != nil
 	default:
 		return false
@@ -167,48 +199,90 @@ func lengthMessage(min bool, n int, unit string) string {
 }
 
 // rangeCondition renders the comparison for one @range bound.
-func rangeCondition(target *model.Shape, expr string, bound float64, min bool) (string, error) {
-	op := "<"
+func rangeCondition(target *model.Shape, expr string, bound *rangeBound, min bool) (string, error) {
+	op := ">"
 	if min {
 		op = "<"
-	} else {
-		op = ">"
 	}
 	switch target.Type {
 	case model.TypeByte, model.TypeShort, model.TypeInteger, model.TypeLong:
-		if isIntegral(bound) && bound >= math.MinInt64 && bound <= math.MaxInt64 {
+		if !bound.hasValue {
+			return "", fmt.Errorf("@range bound %q is not representable", bound.text)
+		}
+		if isIntegral(bound.value) && bound.value >= math.MinInt64 && bound.value <= math.MaxInt64 {
 			// Compare in int64 so a bound outside the Go type's range does not
 			// produce an overflow in the generated constant expression.
-			return fmt.Sprintf("int64(%s) %s %d", expr, op, int64(bound)), nil
+			return fmt.Sprintf("int64(%s) %s %d", expr, op, int64(bound.value)), nil
 		}
-		literal, err := float64Literal(bound)
+		literal, err := float64Literal(bound.value)
 		if err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("float64(%s) %s %s", expr, op, literal), nil
 	case model.TypeFloat:
-		literal, err := float32Literal(bound)
+		if !bound.hasValue {
+			return "", fmt.Errorf("@range bound %q is not representable", bound.text)
+		}
+		literal, err := float32Literal(bound.value)
 		if err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("%s %s float32(%s)", expr, op, literal), nil
 	case model.TypeDouble:
-		literal, err := float64Literal(bound)
+		if !bound.hasValue {
+			return "", fmt.Errorf("@range bound %q is not representable", bound.text)
+		}
+		literal, err := float64Literal(bound.value)
 		if err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("%s %s %s", expr, op, literal), nil
+	case model.TypeBigInteger:
+		literal, err := bigIntegerLiteral(bound.text)
+		if err != nil {
+			return "", err
+		}
+		helper := "bigIntGreater"
+		if min {
+			helper = "bigIntLess"
+		}
+		return fmt.Sprintf("%s(%s, %s)", helper, expr, quoted(literal)), nil
+	case model.TypeBigDecimal:
+		helper := "decimalGreater"
+		if min {
+			helper = "decimalLess"
+		}
+		return fmt.Sprintf("%s(%s, Decimal(%s))", helper, expr, quoted(bound.text)), nil
 	default:
 		return "", fmt.Errorf("range constraints on %s shapes are not supported", target.Type)
 	}
 }
 
-func rangeMessage(target *model.Shape, bound float64, min bool) string {
+// bigIntegerLiteral normalizes a Smithy number lexeme to an exact base-10
+// integer literal. Fractional bounds on bigInteger are rejected by model
+// validation; this guards codegen independently.
+func bigIntegerLiteral(text string) (string, error) {
+	r, ok := new(big.Rat).SetString(text)
+	if !ok {
+		return "", fmt.Errorf("invalid @range bound %q", text)
+	}
+	if !r.IsInt() {
+		return "", fmt.Errorf("@range bound %q is not an integer", text)
+	}
+	return r.Num().String(), nil
+}
+
+func rangeMessage(target *model.Shape, bound *rangeBound, min bool) string {
 	relation := "less than or equal to"
 	if min {
 		relation = "greater than or equal to"
 	}
-	return "must be " + relation + " " + formatRangeFloat(bound)
+	switch target.Type {
+	case model.TypeBigInteger, model.TypeBigDecimal:
+		return "must be " + relation + " " + bound.text
+	default:
+		return "must be " + relation + " " + formatRangeFloat(bound.value)
+	}
 }
 
 func isIntegral(v float64) bool {

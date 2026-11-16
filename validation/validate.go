@@ -2,10 +2,9 @@ package validation
 
 import (
 	"fmt"
-	"math"
+	"math/big"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -782,21 +781,31 @@ func checkRangeConstraint(shape *model.Shape, value model.Node, path string) str
 	if value.Kind != model.NodeNumber {
 		return ""
 	}
-	min, max, ok := shape.Range()
+	min, max, ok := shape.RangeBounds()
 	if !ok {
 		return ""
 	}
-	v, err := strconv.ParseFloat(value.Num, 64)
-	if err != nil {
+	v, ok := numberRat(value.Num)
+	if !ok {
 		return ""
 	}
-	if min != nil && v < *min {
-		return fmt.Sprintf("%svalue %s is less than the minimum %v", path, value.Num, *min)
+	if min != nil {
+		if bound, ok := numberRat(*min); ok && v.Cmp(bound) < 0 {
+			return fmt.Sprintf("%svalue %s is less than the minimum %s", path, value.Num, *min)
+		}
 	}
-	if max != nil && v > *max {
-		return fmt.Sprintf("%svalue %s is greater than the maximum %v", path, value.Num, *max)
+	if max != nil {
+		if bound, ok := numberRat(*max); ok && v.Cmp(bound) > 0 {
+			return fmt.Sprintf("%svalue %s is greater than the maximum %s", path, value.Num, *max)
+		}
 	}
 	return ""
+}
+
+// numberRat parses a Smithy number lexeme exactly. It returns ok=false for
+// malformed numbers; callers skip checks rather than reporting a second time.
+func numberRat(text string) (*big.Rat, bool) {
+	return new(big.Rat).SetString(text)
 }
 
 func checkLengthConstraint(shape *model.Shape, value model.Node, path string) string {
@@ -895,30 +904,41 @@ func validateRangeBounds(m *model.Model) []Event {
 			}
 			target = resolved
 		}
-		switch target.Type {
-		case model.TypeFloat, model.TypeDouble, model.TypeBigDecimal:
-			continue
-		}
-		min, max, ok := s.Range()
+		min, max, ok := s.RangeBounds()
 		if !ok {
 			continue
 		}
-		if min != nil && !isIntegralBound(*min) {
-			events = append(events, makeEvent(ModelInvalidTraitValue, s.Source, s.ID,
-				"@range on `%s` has a fractional `min` value %v, but `%s` does not support decimals",
-				s.ID, *min, target.ID))
+		switch target.Type {
+		case model.TypeFloat, model.TypeDouble, model.TypeBigDecimal:
+			// These shapes support fractional bounds; ordering is still checked.
+		default:
+			if min != nil {
+				if bound, ok := numberRat(*min); ok && !bound.IsInt() {
+					events = append(events, makeEvent(ModelInvalidTraitValue, s.Source, s.ID,
+						"@range on `%s` has a fractional `min` value %s, but `%s` does not support decimals",
+						s.ID, *min, target.ID))
+				}
+			}
+			if max != nil {
+				if bound, ok := numberRat(*max); ok && !bound.IsInt() {
+					events = append(events, makeEvent(ModelInvalidTraitValue, s.Source, s.ID,
+						"@range on `%s` has a fractional `max` value %s, but `%s` does not support decimals",
+						s.ID, *max, target.ID))
+				}
+			}
 		}
-		if max != nil && !isIntegralBound(*max) {
+
+		if min == nil || max == nil {
+			continue
+		}
+		minBound, minOK := numberRat(*min)
+		maxBound, maxOK := numberRat(*max)
+		if minOK && maxOK && minBound.Cmp(maxBound) > 0 {
 			events = append(events, makeEvent(ModelInvalidTraitValue, s.Source, s.ID,
-				"@range on `%s` has a fractional `max` value %v, but `%s` does not support decimals",
-				s.ID, *max, target.ID))
+				"@range on `%s` has a `min` value greater than its `max` value", s.ID))
 		}
 	}
 	return events
-}
-
-func isIntegralBound(v float64) bool {
-	return !math.IsNaN(v) && !math.IsInf(v, 0) && v == math.Trunc(v)
 }
 
 func enumValues(m *model.Model, enum *model.Shape) map[string]bool {
