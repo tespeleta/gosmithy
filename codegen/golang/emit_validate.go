@@ -3,6 +3,7 @@ package golang
 import (
 	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/tespeleta/gosmithy/idl"
 	"github.com/tespeleta/gosmithy/model"
@@ -142,6 +143,31 @@ func (g *generator) emitMemberValidation(w *fileWriter, container *model.Shape, 
 	valueChecks := g.memberValueChecks(member, target)
 	hasNilPresence := g.fieldHasNilPresence(member, target)
 
+	if required && g.requiredPresenceTracked(member, target) {
+		// The JSON decoder recorded whether this plain scalar was absent or
+		// null; a missing value reports presence instead of running value
+		// checks against the zero value.
+		missing := "v." + g.missingFieldName(member)
+		if !valueChecks {
+			w.Line("if %s {", missing)
+			w.In()
+			w.Line("errs.Add(%s, %s)", path, quoted("is required"))
+			w.Out()
+			w.Line("}")
+			return nil
+		}
+		w.Line("if %s {", missing)
+		w.In()
+		w.Line("errs.Add(%s, %s)", path, quoted("is required"))
+		w.Out()
+		w.Line("} else {")
+		w.In()
+		err := g.emitMemberValue(w, member, target, field, path)
+		w.Out()
+		w.Line("}")
+		return err
+	}
+
 	if required && !valueChecks {
 		if hasNilPresence {
 			w.Line("if %s == nil {", field)
@@ -165,7 +191,8 @@ func (g *generator) emitMemberValidation(w *fileWriter, container *model.Shape, 
 		w.Out()
 		w.Line("} else {")
 	case required:
-		// Required plain scalar: no presence check is possible.
+		// A required value with no nil or recorded presence to check; the
+		// value checks still run.
 		opened = false
 	case g.optionalFor(member, target):
 		w.Line("if %s.HasValue() {", field)
@@ -217,7 +244,7 @@ func (g *generator) memberValueChecks(member, target *model.Shape) bool {
 	case model.TypeUnion:
 		return false
 	default:
-		return g.constraintsFor(member, target).hasApplicable(target)
+		return isEnumLike(target) || g.constraintsFor(member, target).hasApplicable(target)
 	}
 }
 
@@ -254,11 +281,18 @@ func (g *generator) emitMemberValue(w *fileWriter, member, target *model.Shape, 
 	}
 
 	c := g.constraintsFor(member, target)
-	if !c.hasApplicable(target) {
+	hasConstraints := c.hasApplicable(target)
+	if !hasConstraints && !isEnumLike(target) {
 		return nil
 	}
 	valueExpr := g.fieldValueExpr(member, target, expr)
-	return g.emitConstraintChecks(w, target, c, valueExpr, path)
+	if hasConstraints {
+		if err := g.emitConstraintChecks(w, target, c, valueExpr, path); err != nil {
+			return err
+		}
+	}
+	g.emitEnumMembership(w, target, valueExpr, path)
+	return nil
 }
 
 func (g *generator) emitCollectionValidator(w *fileWriter, shape *model.Shape) error {
@@ -368,10 +402,10 @@ func (g *generator) needsElementValidation(member, target *model.Shape) bool {
 	switch target.Type {
 	case model.TypeStructure, model.TypeList, model.TypeSet, model.TypeMap:
 		return true
-	case model.TypeUnion, model.TypeEnum, model.TypeIntEnum:
+	case model.TypeUnion:
 		return false
 	default:
-		return g.constraintsFor(member, target).hasApplicable(target)
+		return isEnumLike(target) || g.constraintsFor(member, target).hasApplicable(target)
 	}
 }
 
@@ -407,11 +441,18 @@ func (g *generator) emitElementValue(w *fileWriter, member, target *model.Shape,
 	}
 
 	c := g.constraintsFor(member, target)
-	if !c.hasApplicable(target) {
+	hasConstraints := c.hasApplicable(target)
+	if !hasConstraints && !isEnumLike(target) {
 		return nil
 	}
 	valueExpr := g.elementValueExpr(target, expr, sparse)
-	return g.emitConstraintChecks(w, target, c, valueExpr, path)
+	if hasConstraints {
+		if err := g.emitConstraintChecks(w, target, c, valueExpr, path); err != nil {
+			return err
+		}
+	}
+	g.emitEnumMembership(w, target, valueExpr, path)
+	return nil
 }
 
 // elementValueExpr returns an expression that yields the value of a collection
@@ -436,6 +477,41 @@ func (g *generator) elementValueExpr(target *model.Shape, expr string, sparse bo
 	default:
 		return "*" + expr
 	}
+}
+
+// emitEnumMembership checks that expr is one of the known values of an enum or
+// intEnum target. Membership is a property of the target shape, so it applies
+// whether the value arrived as a structure member or a collection element.
+func (g *generator) emitEnumMembership(w *fileWriter, target *model.Shape, expr, pathExpr string) {
+	if !isEnumLike(target) {
+		return
+	}
+	if _, ok := g.typeName(target); !ok {
+		return
+	}
+	w.Line("if !%s.Valid() {", enumValueExpr(expr))
+	w.In()
+	w.Line("errs.Add(%s, %s)", pathExpr, quoted(enumMembershipMessage(g.enumValues(target))))
+	w.Out()
+	w.Line("}")
+}
+
+// enumValueExpr parenthesizes a dereferenced value so a method call binds to
+// the value rather than to the pointer.
+func enumValueExpr(expr string) string {
+	if strings.HasPrefix(expr, "*") {
+		return "(" + expr + ")"
+	}
+	return expr
+}
+
+// enumMembershipMessage lists the allowed wire values for an enum or intEnum.
+func enumMembershipMessage(values []enumValue) string {
+	allowed := make([]string, 0, len(values))
+	for _, value := range values {
+		allowed = append(allowed, value.value)
+	}
+	return "must be one of: " + strings.Join(allowed, ", ")
 }
 
 func (g *generator) emitConstraintChecks(w *fileWriter, target *model.Shape, c constraints, expr, pathExpr string) error {

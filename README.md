@@ -261,6 +261,7 @@ gen/
     enums.go
     unions.go
     validate.go
+    json.go        # when custom codecs or required scalar presence are needed
     decimal.go     # when the model uses bigDecimal
     relaxed.go     # when relaxed boolean members are generated
     optional.go    # when non-required scalar members use Optional
@@ -285,6 +286,8 @@ shapes as follows:
 | `union` | interface plus per-member wrapper structs |
 | `enum` | named `string` plus constants |
 | `intEnum` | named `int32` plus constants |
+| `Unit` | `struct{}` |
+| error structure | struct implementing `error` + `ErrorCode()` |
 
 ### Optional Go members
 
@@ -311,15 +314,18 @@ omits absent fields. It needs Go 1.24, so a generated `go.mod` declares
 and `go 1.22`. HTTP-bound and `@httpPayload` members keep pointers regardless
 of this setting. `bigDecimal` uses `Optional[Decimal]`, and `bigInteger` uses
 `Optional[*big.Int]`.
-| `Unit` | `struct{}` |
-| error structure | struct implementing `error` + `ErrorCode()` |
 
-Optional members are pointers or nilable slices/maps. Requiredness and
-constraints are enforced by `Validate()`. Structures, errors, and named
-collections all get a `Validate()` method covering `@required`, `@length`,
-`@range`, `@pattern`, `@uniqueItems`, and nested shapes. Member constraints
-override the same constraint on the target shape. Failure paths look like
-`nested.field`, `items[0]`, or `index[key]`.
+Members use `Optional[T]` for non-required scalars, pointers for structures and
+HTTP-bound values, and nilable slices/maps/blobs. Requiredness and constraints
+are enforced by `Validate()`. Required scalars stored as plain Go values get
+their presence from the generated `UnmarshalJSON`, which records members that
+were absent or `null`; `Validate()` reports those with an `is required` error.
+A value built directly in Go carries no presence information, so only decoded
+values are checked this way. Structures, errors, and named collections all get
+a `Validate()` method covering `@required`, `@length`, `@range`, `@pattern`,
+`@uniqueItems`, enum and intEnum membership, and nested shapes. Member
+constraints override the same constraint on the target shape. Failure paths
+look like `nested.field`, `items[0]`, or `index[key]`.
 
 `--list-generators` prints the namespaces and options:
 

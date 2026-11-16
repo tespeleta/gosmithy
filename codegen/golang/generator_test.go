@@ -655,6 +655,23 @@ func TestNestedCollectionPaths(t *testing.T) {
 	failUnlessContains(t, err, "index[a].id: is required")
 }
 
+func TestEnumMembership(t *testing.T) {
+	thing := validThing()
+	badKind := ThingKind("alien")
+	thing.Kind = &badKind
+	failUnlessContains(t, thing.Validate(), "kind: must be one of: widget, gadget")
+
+	thing = validThing()
+	badPriority := Priority(3)
+	thing.Priority = &badPriority
+	failUnlessContains(t, thing.Validate(), "priority: must be one of: 1, 2")
+
+	thing = validThing()
+	badSize := Size("smallish")
+	thing.Size = &badSize
+	failUnlessContains(t, thing.Validate(), "size: must be one of: small, large")
+}
+
 func TestMemberOverridesTargetConstraints(t *testing.T) {
 	in := &ListThingsInput{Ids: ThingIdList{"a"}}
 	failUnlessContains(t, in.Validate(), "ids[0]: must be at least 2 characters")

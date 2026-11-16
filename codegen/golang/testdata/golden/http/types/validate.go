@@ -20,6 +20,13 @@ func (v ColorList) Validate() error {
 }
 
 func (v ColorList) validateContents(errs *smithy.ValidationErrors, prefix string) {
+	for i := range v {
+		elem := v[i]
+		path := fmt.Sprintf("%s[%d]", prefix, i)
+		if !elem.Valid() {
+			errs.Add(path, "must be one of: red, green, blue")
+		}
+	}
 }
 
 // Validate checks the constraints of CreateThingInput.
@@ -30,6 +37,11 @@ func (v *CreateThingInput) Validate() error {
 	var errs smithy.ValidationErrors
 	if v.Name == nil {
 		errs.Add("name", "is required")
+	}
+	if v.Color != nil {
+		if !(*v.Color).Valid() {
+			errs.Add("color", "must be one of: red, green, blue")
+		}
 	}
 	return errs.Err()
 }
@@ -203,6 +215,11 @@ func (v *PatchThingInput) Validate() error {
 	if v.Name == nil {
 		errs.Add("name", "is required")
 	}
+	if v.Color != nil {
+		if !(*v.Color).Valid() {
+			errs.Add("color", "must be one of: red, green, blue")
+		}
+	}
 	return errs.Err()
 }
 
@@ -311,6 +328,11 @@ func (v *Thing) Validate() error {
 	}
 	if v.Name == nil {
 		errs.Add("name", "is required")
+	}
+	if v.Color != nil {
+		if !(*v.Color).Valid() {
+			errs.Add("color", "must be one of: red, green, blue")
+		}
 	}
 	if v.CreatedAt == nil {
 		errs.Add("createdAt", "is required")

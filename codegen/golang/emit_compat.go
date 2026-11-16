@@ -42,6 +42,34 @@ func (g *generator) fieldIsPlainValue(member, target *model.Shape) bool {
 	return ok && container.Type == model.TypeStructure
 }
 
+// requiredPresenceTracked reports whether member is a required scalar stored as
+// a plain Go value. Its presence cannot be inferred from the value, so the
+// generated JSON decoder records whether it was absent or null.
+func (g *generator) requiredPresenceTracked(member, target *model.Shape) bool {
+	return g.fieldIsPlainValue(member, target)
+}
+
+// missingFieldName is the unexported field recording whether a required plain
+// scalar member was absent or null in the decoded JSON.
+func (g *generator) missingFieldName(member *model.Shape) string {
+	return "missing" + g.fieldName(member)
+}
+
+// needsRequiredPresence reports whether shape has a required plain scalar
+// member whose presence the generated JSON decoder must record.
+func (g *generator) needsRequiredPresence(shape *model.Shape) bool {
+	if shape == nil || shape.Type != model.TypeStructure {
+		return false
+	}
+	for _, member := range shape.Members {
+		target, ok := g.m.Shape(member.Target)
+		if ok && g.requiredPresenceTracked(member, target) {
+			return true
+		}
+	}
+	return false
+}
+
 func isOptionalScalarType(t model.ShapeType) bool {
 	switch t {
 	case model.TypeString, model.TypeBoolean,
@@ -556,29 +584,25 @@ func (g *generator) emitPlainUnmarshal(w *fileWriter, member, target *model.Shap
 	}
 }
 
-// emitRelaxedStructUnmarshal writes an UnmarshalJSON method for a structure
-// that has relaxed numeric or decimal members but no other custom codec. The
-// shadow struct keeps encoding/json's key matching, unknown-field handling,
-// and per-field error behavior.
-func (g *generator) emitRelaxedStructUnmarshal(w *fileWriter, shape *model.Shape) {
+// emitStructUnmarshal writes the UnmarshalJSON method for a structure that has
+// custom member codecs, relaxed numeric members, or required scalar presence to
+// record. It decodes the object into raw member values and then decodes each
+// present member explicitly, which preserves custom codecs and lets the method
+// record whether a required plain scalar was absent or null.
+func (g *generator) emitStructUnmarshal(w *fileWriter, shape *model.Shape) {
 	name, ok := g.typeName(shape)
 	if !ok {
 		return
 	}
 	w.AddImport("encoding/json", "")
-	w.AddImport("fmt", "")
-	w.Line("// UnmarshalJSON implements json.Unmarshaler with relaxed input members.")
+	if len(shape.Members) > 0 {
+		w.AddImport("fmt", "")
+	}
+	w.Line("// UnmarshalJSON implements json.Unmarshaler using the httpJson value encoding.")
 	w.Line("func (v *%s) UnmarshalJSON(data []byte) error {", name)
 	w.In()
-	w.Line("var wire struct {")
-	w.In()
-	for _, member := range shape.Members {
-		field := g.fieldName(member)
-		w.Line("%s json.RawMessage `json:%q`", field, g.memberJSONName(member))
-	}
-	w.Out()
-	w.Line("}")
-	w.Line("if err := json.Unmarshal(data, &wire); err != nil {")
+	w.Line("var fields map[string]json.RawMessage")
+	w.Line("if err := json.Unmarshal(data, &fields); err != nil {")
 	w.In()
 	w.Line("return err")
 	w.Out()
@@ -589,11 +613,22 @@ func (g *generator) emitRelaxedStructUnmarshal(w *fileWriter, shape *model.Shape
 			continue
 		}
 		field := g.fieldName(member)
-		dest := "v." + field
-		w.Line("if wire.%s != nil {", field)
-		w.In()
+		jsonName := quoted(g.memberJSONName(member))
 		fail := fmt.Sprintf("return fmt.Errorf(%q, err)", memberErrorFormat(g.memberJSONName(member)))
-		g.emitUnmarshalValue(w, member, target, "wire."+field, dest, fieldHasPointerWrapper(target), fail)
+		if g.requiredPresenceTracked(member, target) {
+			missing := g.missingFieldName(member)
+			w.Line("v.%s = true", missing)
+			w.Line("if raw, ok := fields[%s]; ok && string(raw) != \"null\" {", jsonName)
+			w.In()
+			w.Line("v.%s = false", missing)
+			g.emitUnmarshalValue(w, member, target, "raw", "v."+field, fieldHasPointerWrapper(target), fail)
+			w.Out()
+			w.Line("}")
+			continue
+		}
+		w.Line("if raw, ok := fields[%s]; ok {", jsonName)
+		w.In()
+		g.emitUnmarshalValue(w, member, target, "raw", "v."+field, fieldHasPointerWrapper(target), fail)
 		w.Out()
 		w.Line("}")
 	}

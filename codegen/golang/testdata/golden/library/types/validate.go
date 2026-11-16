@@ -50,6 +50,10 @@ func (v *Book) Validate() error {
 	}
 	if v.Genre == nil {
 		errs.Add("genre", "is required")
+	} else {
+		if !(*v.Genre).Valid() {
+			errs.Add("genre", "must be one of: fiction, non-fiction, reference")
+		}
 	}
 	if v.Author == nil {
 		errs.Add("author", "is required")
@@ -62,6 +66,11 @@ func (v *Book) Validate() error {
 		}
 		if int64(*v.Rating) > 100 {
 			errs.Add("rating", "must be less than or equal to 100")
+		}
+	}
+	if v.ReadingLevel != nil {
+		if !(*v.ReadingLevel).Valid() {
+			errs.Add("readingLevel", "must be one of: 1, 2, 3")
 		}
 	}
 	if v.Tags != nil {
@@ -124,6 +133,13 @@ func (v GenreList) Validate() error {
 }
 
 func (v GenreList) validateContents(errs *smithy.ValidationErrors, prefix string) {
+	for i := range v {
+		elem := v[i]
+		path := fmt.Sprintf("%s[%d]", prefix, i)
+		if !elem.Valid() {
+			errs.Add(path, "must be one of: fiction, non-fiction, reference")
+		}
+	}
 }
 
 // Validate checks the constraints of GetBookInput.
@@ -217,6 +233,11 @@ func (v *SearchInput) Validate() error {
 	var errs smithy.ValidationErrors
 	if v.Query == nil {
 		errs.Add("query", "is required")
+	}
+	if v.Genre != nil {
+		if !(*v.Genre).Valid() {
+			errs.Add("genre", "must be one of: fiction, non-fiction, reference")
+		}
 	}
 	if v.MinRating != nil {
 		if int64(*v.MinRating) < 0 {

@@ -10,9 +10,9 @@ import (
 func (g *generator) emitTypesFile() ([]byte, error) {
 	doc := fmt.Sprintf(
 		"Package types contains Go data types and validators generated from the Smithy service %s.\n\n"+
-			"Member presence is represented by Optional, pointers, or nil slices/maps. Constraints are "+
-			"enforced by the Validate methods; callers should not build cyclic values. Required plain "+
-			"scalars are not presence-checked.\n\n"+
+			"Member presence is represented by Optional, pointers, or nil slices/maps. Required scalar "+
+			"presence is recorded by the generated JSON decoders and enforced by the Validate methods; "+
+			"callers should not build cyclic values.\n\n"+
 			"Known limitations: @default and @clientOptional are not applied, @length counts Unicode "+
 			"code points for strings and bytes for blobs, and @pattern uses Go's RE2 regular "+
 			"expressions rather than ECMAScript.",
@@ -55,6 +55,12 @@ func (g *generator) emitStructure(w *fileWriter, shape *model.Shape) {
 			}
 			target, _ := g.m.Shape(member.Target)
 			w.Line("%s %s `json:%q`", g.fieldName(member), typ, g.fieldJSONTag(member, target))
+		}
+		for _, member := range shape.Members {
+			target, ok := g.m.Shape(member.Target)
+			if ok && g.requiredPresenceTracked(member, target) {
+				w.Line("%s bool", g.missingFieldName(member))
+			}
 		}
 		w.Out()
 		w.Line("}")

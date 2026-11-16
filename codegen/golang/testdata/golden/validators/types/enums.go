@@ -17,6 +17,15 @@ func (Priority) Values() []Priority {
 	}
 }
 
+// Valid reports whether e is one of the known values of Priority.
+func (e Priority) Valid() bool {
+	switch e {
+	case PriorityLow, PriorityHigh:
+		return true
+	}
+	return false
+}
+
 type Size string
 
 const (
@@ -32,6 +41,15 @@ func (Size) Values() []Size {
 	}
 }
 
+// Valid reports whether e is one of the known values of Size.
+func (e Size) Valid() bool {
+	switch e {
+	case SizeSmall, SizeLarge:
+		return true
+	}
+	return false
+}
+
 type ThingKind string
 
 const (
@@ -45,4 +63,13 @@ func (ThingKind) Values() []ThingKind {
 		ThingKindWidget,
 		ThingKindGadget,
 	}
+}
+
+// Valid reports whether e is one of the known values of ThingKind.
+func (e ThingKind) Valid() bool {
+	switch e {
+	case ThingKindWidget, ThingKindGadget:
+		return true
+	}
+	return false
 }

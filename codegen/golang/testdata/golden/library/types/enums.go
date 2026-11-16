@@ -20,6 +20,15 @@ func (Genre) Values() []Genre {
 	}
 }
 
+// Valid reports whether e is one of the known values of Genre.
+func (e Genre) Valid() bool {
+	switch e {
+	case GenreFiction, GenreNonFiction, GenreReference:
+		return true
+	}
+	return false
+}
+
 // A coarse reading level.
 type ReadingLevel int32
 
@@ -36,4 +45,13 @@ func (ReadingLevel) Values() []ReadingLevel {
 		ReadingLevelTeen,
 		ReadingLevelAdult,
 	}
+}
+
+// Valid reports whether e is one of the known values of ReadingLevel.
+func (e ReadingLevel) Valid() bool {
+	switch e {
+	case ReadingLevelChild, ReadingLevelTeen, ReadingLevelAdult:
+		return true
+	}
+	return false
 }

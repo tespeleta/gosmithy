@@ -297,15 +297,16 @@ specification.
   - [x] Go named string type with constants and `Values()`.
   - [x] `@enum` on a string shape is emitted as an enum-like Go type.
   - [x] Enum member docs and `@deprecated` are emitted.
-  - [ ] Generated enum values are not validated for membership at runtime; Go
-        permits any value of the named type.
+  - [x] Known values expose `Valid()`, and `Validate()` rejects unknown `enum`
+        values with `must be one of: …` for members and collection elements.
 - [x] **intEnum**
   - [x] `intEnum` shape with integer members.
   - [x] Validation: at least one member, integer values, unique values, int32
         range.
   - [x] Go named `int32` type with constants and `Values()`.
   - [x] `@enumValue`-backed values.
-  - [ ] IntEnum values are not validated for membership at runtime.
+  - [x] Known values expose `Valid()`, and `Validate()` rejects unknown
+        `intEnum` values with the allowed integers.
 - [x] **Timestamp serialization and deserialization**
   - [x] All four formats in both directions for `httpJson`.
   - [x] Exact epoch-seconds parsing/formatting without float64.
@@ -1503,9 +1504,10 @@ project includes what the generator can emit.
 - [x] Structures, lists, sets, maps, Unit, unions, enums, intEnums, and errors.
 - [x] Error types implement `error`, `ErrorCode()`, and `ErrorFault()`.
 - [x] Nullability rules: `Optional[T]` for non-required structure scalars by
-      default, plain `T` for required scalars, pointers for HTTP-bound and
-      payload members, nilable slices/maps/blobs/documents, nil interfaces for
-      absent unions. `--useOptionals=false` restores pointer scalars.
+      default, plain `T` for required scalars with presence recorded by the
+      generated JSON decoders, pointers for HTTP-bound and payload members,
+      nilable slices/maps/blobs/documents, nil interfaces for absent unions.
+      `--useOptionals=false` restores pointer scalars.
 - [x] `Optional[T]` provides `IsSet`, `IsNull`, `HasValue`, `Value`, `Set`,
       `SetNull`, and works with `omitzero` (Go 1.24).
 - [x] `@sparse` pointer-like elements and values.
@@ -1531,8 +1533,11 @@ project includes what the generator can emit.
 - [x] `Validate()` on every structure, named list, named set, and named map.
 - [x] Nil receivers are valid.
 - [x] `@required` uses nil as absence for pointers/nilables; required scalars
-      are plain values and `Optional` presence is checked with `HasValue`;
-      empty values are not absent.
+      are plain values whose absence or `null` is recorded by the generated
+      JSON decoders and reported by `Validate()`; `Optional` presence is
+      checked with `HasValue`; empty values are not absent.
+  - Limitation: presence cannot be inferred from a value built directly in Go,
+    so only JSON-decoded required scalars are presence-checked.
 - [x] `@length` for strings (code points), blobs (bytes), and collections.
 - [x] `@range` for integers, floats, bigInteger, and bigDecimal; wide bounds
       do not overflow.
@@ -1545,7 +1550,8 @@ project includes what the generator can emit.
 - [ ] Map-key validation.
 - [x] `@range` on bigInteger/bigDecimal.
 - [ ] `@default`/`@clientOptional` validation effects.
-- [ ] Enum/intEnum membership validation.
+- [x] Enum/intEnum membership validation for members, `Optional` values, and
+      list/map elements.
 - [ ] Cycle detection or recursion-depth guards (callers must not build cyclic
       values).
 - [ ] Client-side input validation; the server validates decoded input.

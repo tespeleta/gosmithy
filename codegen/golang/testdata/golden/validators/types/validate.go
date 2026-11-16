@@ -487,10 +487,22 @@ func (v *Thing) Validate() error {
 	}
 	if v.Kind == nil {
 		errs.Add("kind", "is required")
+	} else {
+		if !(*v.Kind).Valid() {
+			errs.Add("kind", "must be one of: widget, gadget")
+		}
+	}
+	if v.Priority != nil {
+		if !(*v.Priority).Valid() {
+			errs.Add("priority", "must be one of: 1, 2")
+		}
 	}
 	if v.Size != nil {
 		if !pattern0.MatchString(string(*v.Size)) {
 			errs.Add("size", "must match pattern `^[a-z]+$`")
+		}
+		if !(*v.Size).Valid() {
+			errs.Add("size", "must be one of: small, large")
 		}
 	}
 	if v.OptionalTags != nil {

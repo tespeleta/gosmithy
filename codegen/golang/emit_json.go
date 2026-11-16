@@ -1,7 +1,6 @@
 package golang
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/tespeleta/gosmithy/model"
@@ -17,39 +16,64 @@ import (
 //     interface;
 //   - timestamps honor @timestampFormat, while time.Time always uses RFC 3339;
 //   - bigDecimal values must stay JSON numbers without passing through
-//     float64.
+//     float64;
+//   - required scalars are plain Go values, so the decoder must record whether
+//     they were absent or null.
 //
 // The generator emits explicit methods for exactly the shapes that need them.
 // Every other shape delegates to encoding/json, which also means custom codecs
 // compose: a structure containing a union field uses the union's generated
 // helper from its own UnmarshalJSON.
 func (g *generator) emitJSONFile() ([]byte, error) {
-	var shapes []*model.Shape
-	var relaxed []*model.Shape
+	needed := false
 	for _, shape := range g.shapes {
-		if g.needsCustomJSON(shape) {
-			shapes = append(shapes, shape)
+		if shape.Type == model.TypeStructure {
+			if g.needsCustomJSON(shape) || g.needsStructUnmarshalJSON(shape) {
+				needed = true
+				break
+			}
 			continue
 		}
-		if g.needsRelaxedStructJSON(shape) {
-			relaxed = append(relaxed, shape)
+		if g.needsCustomJSON(shape) {
+			needed = true
+			break
 		}
 	}
-	if len(shapes) == 0 && len(relaxed) == 0 {
+	if !needed {
 		return nil, nil
 	}
 
-	w := newFileWriter("types", "JSON codecs for unions, formatted timestamps, and relaxed input members. "+
-		"They implement the value encoding rules of gosmithy.protocols#httpJson.")
+	w := newFileWriter("types", "JSON codecs for unions, formatted timestamps, relaxed input members, "+
+		"and required scalar presence. They implement the value encoding rules of gosmithy.protocols#httpJson.")
 	first := true
-	for _, shape := range shapes {
+	separate := func() {
 		if !first {
 			w.Line("")
 		}
 		first = false
+	}
+	for _, shape := range g.shapes {
+		if shape.Type == model.TypeStructure {
+			if !g.needsCustomJSON(shape) && !g.needsStructUnmarshalJSON(shape) {
+				continue
+			}
+			separate()
+			if g.needsCustomJSON(shape) {
+				g.emitStructMarshalJSON(w, shape)
+			}
+			if g.needsStructUnmarshalJSON(shape) {
+				if g.needsCustomJSON(shape) {
+					w.Line("")
+				}
+				g.emitStructUnmarshal(w, shape)
+			}
+			continue
+		}
+		if !g.needsCustomJSON(shape) {
+			continue
+		}
+		separate()
 		switch shape.Type {
-		case model.TypeStructure:
-			g.emitStructJSON(w, shape)
 		case model.TypeUnion:
 			g.emitUnionJSON(w, shape)
 		case model.TypeList, model.TypeSet:
@@ -58,14 +82,14 @@ func (g *generator) emitJSONFile() ([]byte, error) {
 			g.emitMapJSON(w, shape)
 		}
 	}
-	for _, shape := range relaxed {
-		if !first {
-			w.Line("")
-		}
-		first = false
-		g.emitRelaxedStructUnmarshal(w, shape)
-	}
 	return w.Render()
+}
+
+// needsStructUnmarshalJSON reports whether a structure needs a generated
+// UnmarshalJSON: custom member codecs, relaxed numeric members, or required
+// scalar presence to record.
+func (g *generator) needsStructUnmarshalJSON(shape *model.Shape) bool {
+	return g.needsCustomJSON(shape) || g.needsRelaxedStructJSON(shape) || g.needsRequiredPresence(shape)
 }
 
 // needsCustomJSON reports whether a shape needs generated JSON methods.
@@ -155,7 +179,7 @@ func (g *generator) addJSONImports(w *fileWriter) {
 
 // --- structures ---------------------------------------------------------------
 
-func (g *generator) emitStructJSON(w *fileWriter, shape *model.Shape) {
+func (g *generator) emitStructMarshalJSON(w *fileWriter, shape *model.Shape) {
 	name, ok := g.typeName(shape)
 	if !ok {
 		return
@@ -173,42 +197,6 @@ func (g *generator) emitStructJSON(w *fileWriter, shape *model.Shape) {
 		g.emitMarshalMember(w, member, target)
 	}
 	w.Line("return json.Marshal(fields)")
-	w.Out()
-	w.Line("}")
-	w.Line("")
-
-	g.addJSONImports(w)
-	w.Line("// UnmarshalJSON implements json.Unmarshaler using the httpJson value encoding.")
-	w.Line("func (v *%s) UnmarshalJSON(data []byte) error {", name)
-	w.In()
-	w.Line("var fields map[string]json.RawMessage")
-	w.Line("if err := json.Unmarshal(data, &fields); err != nil {")
-	w.In()
-	w.Line("return err")
-	w.Out()
-	w.Line("}")
-	w.Line("for key, raw := range fields {")
-	w.In()
-	w.Line("switch key {")
-	if len(shape.Members) > 0 {
-		w.AddImport("fmt", "")
-	}
-	for _, member := range shape.Members {
-		target, ok := g.m.Shape(member.Target)
-		if !ok {
-			continue
-		}
-		w.Line("case %s:", quoted(g.memberJSONName(member)))
-		w.In()
-		address := fieldHasPointerWrapper(target)
-		fail := fmt.Sprintf("return fmt.Errorf(%q, err)", memberErrorFormat(g.memberJSONName(member)))
-		g.emitUnmarshalValue(w, member, target, "raw", "v."+g.fieldName(member), address, fail)
-		w.Out()
-	}
-	w.Line("}")
-	w.Out()
-	w.Line("}")
-	w.Line("return nil")
 	w.Out()
 	w.Line("}")
 }

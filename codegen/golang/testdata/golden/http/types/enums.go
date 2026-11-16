@@ -18,3 +18,12 @@ func (Color) Values() []Color {
 		ColorBlue,
 	}
 }
+
+// Valid reports whether e is one of the known values of Color.
+func (e Color) Valid() bool {
+	switch e {
+	case ColorRed, ColorGreen, ColorBlue:
+		return true
+	}
+	return false
+}

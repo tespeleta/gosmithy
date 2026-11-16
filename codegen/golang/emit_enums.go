@@ -3,6 +3,7 @@ package golang
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/tespeleta/gosmithy/model"
 	"github.com/tespeleta/gosmithy/validation"
@@ -90,6 +91,21 @@ func (g *generator) emitEnum(w *fileWriter, shape *model.Shape, name string) {
 		w.Out()
 		w.Line("}")
 	}
+	w.Out()
+	w.Line("}")
+	w.Line("")
+	w.Line("// Valid reports whether e is one of the known values of %s.", name)
+	w.Line("func (e %s) Valid() bool {", name)
+	w.In()
+	if len(declared) > 0 {
+		w.Line("switch e {")
+		w.Line("case %s:", strings.Join(declared, ", "))
+		w.In()
+		w.Line("return true")
+		w.Out()
+		w.Line("}")
+	}
+	w.Line("return false")
 	w.Out()
 	w.Line("}")
 }
