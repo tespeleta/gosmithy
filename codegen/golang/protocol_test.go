@@ -169,7 +169,7 @@ func runProtocolGenerator(t *testing.T, m *model.Model, service model.ShapeID, m
 		Version:  model.V2_0,
 		Protocol: &codegen.Protocol{ID: httpjson.ID},
 		Target:   codegen.Target{Name: GeneratorName, Generators: []string{GeneratorName}},
-		Options:  map[string]string{"module": module, "useOptionals": "false"},
+		Options:  map[string]string{"module": module, "useOptionals": "false", "goMod": "true"},
 	}
 	resp, err := New().Generate(context.Background(), req)
 	if err != nil {

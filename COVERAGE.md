@@ -1519,8 +1519,8 @@ project includes what the generator can emit.
       docs output; there is no protocol flag.
 - [x] `types.Unit` is always emitted.
 - [x] Deterministic output, `go/format`, sorted imports.
-- [x] Generated `go.mod` with no third-party dependencies; `go 1.24` when
-      optionals are enabled, `go 1.22` otherwise.
+- [x] Opt-in `go.mod` (`--goMod`) with no third-party dependencies; `go 1.24`
+      when optionals are enabled, `go 1.22` otherwise.
 - [ ] `@default` and `@clientOptional` semantics.
 - [ ] Input/output-specific Go type variants.
 - [ ] Service/resource client abstractions and pagination helpers.
@@ -1633,8 +1633,8 @@ project includes what the generator can emit.
 - [x] `model --json` deterministic debug view; `-prelude=false` and
       `-protocols=false`.
 - [x] Built-in protocol definitions assembled by default.
-- [x] `generate --service/--generator/--module/--out/--clean/--list-generators/
-      --opt`.
+- [x] `generate --service/--generator/--module/--goMod/--out/--clean/
+      --list-generators/--opt`.
 - [x] Repeatable/comma-separated `--generator`; `--module` is required when
       any Go option (`go:model`, `go:server`, or `go:client`) is selected.
 - [x] Generator namespaces and options: `go:model`, `go:server`, `go:client`,

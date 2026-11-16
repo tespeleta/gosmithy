@@ -64,6 +64,7 @@ func runGenerate(args []string) error {
 	service := fs.String("service", "", "service shape ID to generate")
 	module := fs.String("module", "", "Go module path for the generated module")
 	useOptionals := fs.Bool("useOptionals", true, "generate Optional[T] for non-required scalar members (Go only)")
+	goMod := fs.Bool("goMod", false, "generate go.mod for the output (Go only)")
 	out := fs.String("out", "", "output directory")
 	clean := fs.Bool("clean", false, "remove the output directory before writing")
 	list := fs.Bool("list-generators", false, "list registered generators and exit")
@@ -139,6 +140,13 @@ func runGenerate(args []string) error {
 			return fmt.Errorf("--useOptionals=%s conflicts with --opt useOptionals=%s", optionalValue, existing)
 		}
 		options["useOptionals"] = optionalValue
+	}
+	if flagWasSet(fs, "goMod") {
+		goModValue := strconv.FormatBool(*goMod)
+		if existing, ok := options["goMod"]; ok && existing != goModValue {
+			return fmt.Errorf("--goMod=%s conflicts with --opt goMod=%s", goModValue, existing)
+		}
+		options["goMod"] = goModValue
 	}
 
 	files, err := parseFiles(fs.Args())

@@ -143,6 +143,24 @@ func TestGeneratedGoModHasNoDependencies(t *testing.T) {
 	}
 }
 
+func TestGoModIsOptIn(t *testing.T) {
+	m := loadFixture(t, "../../testdata/weather.smithy")
+	files, diags, err := runGenerator(t, m, model.MustShapeID("example.weather#Weather"), "example.com/weather", map[string]string{"goMod": "false"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range diags {
+		if d.Severity == validation.Warning && strings.Contains(d.Message, "goMod") {
+			t.Errorf("goMod option warned: %s", d)
+		}
+	}
+	for _, file := range files {
+		if file.Path == "go.mod" {
+			t.Fatal("go.mod generated without opting in")
+		}
+	}
+}
+
 func TestGeneratedValidatorBehavior(t *testing.T) {
 	skipIfShort(t)
 	t.Parallel()
@@ -363,6 +381,9 @@ func runGenerator(t *testing.T, m *model.Model, service model.ShapeID, module st
 	}
 	if _, ok := options["useOptionals"]; !ok {
 		options["useOptionals"] = "false"
+	}
+	if _, ok := options["goMod"]; !ok {
+		options["goMod"] = "true"
 	}
 	req := &codegen.Request{
 		Model:   m,

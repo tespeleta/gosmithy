@@ -77,6 +77,7 @@ make build
 ./bin/gosmithy generate \
     --service example.weather#Weather \
     --generator go:model \
+    --goMod \
     --module example.com/weather \
     --out ./gen \
     testdata/weather.smithy
@@ -87,6 +88,7 @@ make build
 ./bin/gosmithy generate \
     --service example.library#Library \
     --generator go:model,go:server,go:client \
+    --goMod \
     --module example.com/library \
     --out ./gen-http \
     testdata/library.smithy
@@ -97,6 +99,7 @@ make build
 ./bin/gosmithy generate \
     --service example.library#Library \
     --generator go:model,go:server,go:client,openapi:descriptor,openapi:index,docs:markdown \
+    --goMod \
     --module example.com/library \
     --out ./gen-all \
     testdata/library.smithy
@@ -248,7 +251,7 @@ A model-only Go generation produces:
 
 ```text
 gen/
-  go.mod
+  go.mod            # only with --goMod
   internal/smithy/
     json.go
     validate.go
@@ -303,7 +306,7 @@ if in.Count.HasValue() {
 ```
 
 `Optional` distinguishes absent, explicit `null`, and a value; `omitzero`
-omits absent fields. It needs Go 1.24, so generated `go.mod` declares
+omits absent fields. It needs Go 1.24, so a generated `go.mod` declares
 `go 1.24`. Pass `--useOptionals=false` to restore the pointer representation
 and `go 1.22`. HTTP-bound and `@httpPayload` members keep pointers regardless
 of this setting. `bigDecimal` uses `Optional[Decimal]`, and `bigInteger` uses
@@ -326,7 +329,9 @@ go: client, model, server
 openapi: descriptor, index
 ```
 
-Repeatable `--opt key=value` flags pass generator-specific options.
+Repeatable `--opt key=value` flags pass generator-specific options. Go
+generation does not write a `go.mod` by default, since it usually targets an
+existing module; pass `--goMod` (or `--opt goMod=true`) to include one.
 
 ## HTTP+JSON clients and servers
 
@@ -334,7 +339,7 @@ The Go namespace has three options; the bare `go` namespace selects all three:
 
 | Generator | Emits |
 |---|---|
-| `go:model` | The base module: `go.mod`, types, validators, and codecs. |
+| `go:model` | The base module: types, validators, and codecs. |
 | `go:server` | The base module plus the service interface, server, protocol helpers, and HTTP runtime. |
 | `go:client` | The base module plus the client, protocol helpers, and HTTP runtime. |
 | `go` | All Go options: model, server, and client. |
@@ -343,7 +348,7 @@ Select `go:server,go:client` (or simply `go`) for a full client and server:
 
 ```text
 gen-http/
-  go.mod
+  go.mod            # only with --goMod
   service.go
   client.go
   server.go
@@ -570,7 +575,7 @@ Useful flags:
 |---|---|
 | `validate` | `-min-severity note\|warning\|danger`, `-json` |
 | `model` | `-json`, `-prelude=false`, `-protocols=false` |
-| `generate` | `--service`, `--generator` (namespace or `namespace:option`; repeatable/comma-separated; default all), `--module` (required for Go), `--out`, `--clean`, `--list-generators`, `--opt key=value` |
+| `generate` | `--service`, `--generator` (namespace or `namespace:option`; repeatable/comma-separated; default all), `--module` (required for Go), `--goMod` (write `go.mod`; default off), `--out`, `--clean`, `--list-generators`, `--opt key=value` |
 
 `--generator go` selects all Go options; `--generator go:model` selects only
 the base module. Omitting `--generator` selects every namespace and option.

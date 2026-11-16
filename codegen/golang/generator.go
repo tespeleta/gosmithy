@@ -124,6 +124,10 @@ type generator struct {
 	needsBigDecimalRange bool
 
 	useOptionals bool
+
+	// goMod reports whether the base generator writes go.mod. Most projects
+	// generate into an existing module, so this is opt-in.
+	goMod bool
 }
 
 // Generate implements codegen.Generator.
@@ -162,6 +166,13 @@ func (g *generator) Generate(ctx context.Context, req *codegen.Request) (*codege
 			return nil, fmt.Errorf("golang: invalid useOptionals value %q", raw)
 		}
 		g.useOptionals = value
+	}
+	if raw, ok := req.Options["goMod"]; ok {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			return nil, fmt.Errorf("golang: invalid goMod value %q", raw)
+		}
+		g.goMod = value
 	}
 	emitBase := g.emitBase()
 	emitProtocolRuntime := g.emitProtocolRuntime()
@@ -221,7 +232,7 @@ func (g *generator) Generate(ctx context.Context, req *codegen.Request) (*codege
 	}
 
 	files := make([]codegen.File, 0, 12)
-	if emitBase {
+	if emitBase && g.goMod {
 		files = append(files, codegen.File{
 			Path:    "go.mod",
 			Content: []byte(fmt.Sprintf("module %s\n\ngo %s\n", g.module, g.goVersion())),
@@ -416,7 +427,7 @@ func (g *generator) checkOptions() {
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		if key != "module" && key != "useOptionals" {
+		if key != "module" && key != "useOptionals" && key != "goMod" {
 			g.diagnostic(validation.Warning, idl.SourceLocation{}, "unknown Go generator option %q", key)
 		}
 	}
