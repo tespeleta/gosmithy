@@ -300,7 +300,7 @@ func TestTimestampListQueryServer(t *testing.T) {
 }
 
 func TestProtocolContracts(t *testing.T) {
-	requireIntegration(t)
+	skipIfShort(t)
 	for _, tc := range protocolContracts {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

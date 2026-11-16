@@ -611,20 +611,14 @@ testdata/        fixture corpus, examples, and golden codegen output
 ## Development
 
 ```sh
-make check      # gofmt check + go vet + full test suite
-make test-fast  # fast loop: skips tests that compile generated modules
+make check   # gofmt check + go vet + go test
 ```
-
-Generated-module compilation tests are opt-in via `GOSMITHY_INTEGRATION=1`.
-They are the slow part of the suite; a plain `go test ./...` skips them.
 
 | Target | Action |
 |---|---|
 | `make build` | Build `bin/gosmithy` (default) |
-| `make test` | Run `go test ./...` with `GOSMITHY_INTEGRATION=1` |
-| `make test-fast` | Run `go test ./...` without generated-module compilation |
-| `make test-integration` | Run with `GOSMITHY_INTEGRATION=1` |
-| `make test-race` | Run tests with the race detector (generated-module tests skipped) |
+| `make test` | Run `go test ./...` |
+| `make test-race` | Run tests with the race detector |
 | `make vet` | Run `go vet ./...` |
 | `make fmt` | Format all Go sources |
 | `make fmt-check` | Fail if any source is not gofmt-clean |

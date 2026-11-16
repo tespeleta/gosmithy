@@ -226,7 +226,7 @@ structure In {
 }
 
 func TestCompileInlineCollections(t *testing.T) {
-	requireIntegration(t)
+	skipIfShort(t)
 	m := assembleSources(t, `$version: "2.1"
 namespace tdd
 
@@ -263,7 +263,7 @@ operation Op {
 }
 
 func TestCompileInlineCollectionNameCollision(t *testing.T) {
-	requireIntegration(t)
+	skipIfShort(t)
 	m := assembleSources(t, `$version: "2.1"
 namespace tdd
 
@@ -295,7 +295,7 @@ operation Op {
 }
 
 func TestCompileMatrix(t *testing.T) {
-	requireIntegration(t)
+	skipIfShort(t)
 	for _, tc := range matrixCases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

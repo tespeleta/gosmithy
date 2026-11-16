@@ -20,18 +20,11 @@ import (
 
 var updateGolden = flag.Bool("update", false, "update golden files")
 
-// integrationEnabled reports whether generated-module compilation tests run.
-func integrationEnabled() bool { return os.Getenv("GOSMITHY_INTEGRATION") == "1" }
-
-// requireIntegration skips tests that write and compile generated Go modules
-// unless explicitly enabled. They are by far the slowest part of the suite.
-func requireIntegration(t *testing.T) {
+// skipIfShort skips tests that write and compile generated Go modules.
+func skipIfShort(t *testing.T) {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping generated-module compilation in -short mode")
-	}
-	if !integrationEnabled() {
-		t.Skip("set GOSMITHY_INTEGRATION=1 to compile generated modules")
 	}
 }
 
@@ -96,9 +89,6 @@ func TestGolden(t *testing.T) {
 				}
 			}
 
-			if !integrationEnabled() {
-				return
-			}
 			dir := t.TempDir()
 			writeFiles(t, dir, files)
 			runGo(t, dir, "build", "./...")
@@ -153,7 +143,7 @@ func TestGeneratedGoModHasNoDependencies(t *testing.T) {
 }
 
 func TestGeneratedValidatorBehavior(t *testing.T) {
-	requireIntegration(t)
+	skipIfShort(t)
 	m := loadFixture(t, "../../testdata/validators.smithy")
 	files, _, err := runGenerator(t, m, model.MustShapeID("example.codegen#Example"), "example.com/codegen", nil)
 	if err != nil {

@@ -12,7 +12,7 @@ import (
 )
 
 func TestRelaxedContracts(t *testing.T) {
-	requireIntegration(t)
+	skipIfShort(t)
 	cases := []struct {
 		name   string
 		source string
