@@ -59,6 +59,7 @@ var goldenCases = []goldenCase{
 func TestGolden(t *testing.T) {
 	for _, tc := range goldenCases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			m := loadFixture(t, tc.fixture)
 			requireValid(t, m)
 			files, diags, err := runGenerator(t, m, tc.service, tc.module, nil)
@@ -144,6 +145,7 @@ func TestGeneratedGoModHasNoDependencies(t *testing.T) {
 
 func TestGeneratedValidatorBehavior(t *testing.T) {
 	skipIfShort(t)
+	t.Parallel()
 	m := loadFixture(t, "../../testdata/validators.smithy")
 	files, _, err := runGenerator(t, m, model.MustShapeID("example.codegen#Example"), "example.com/codegen", nil)
 	if err != nil {

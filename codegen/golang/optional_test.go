@@ -60,6 +60,7 @@ func runOptionalContract(t *testing.T, source, testSrc, run string) {
 
 func TestOptionalContracts(t *testing.T) {
 	skipIfShort(t)
+	t.Parallel()
 	t.Run("scalars", func(t *testing.T) {
 		t.Parallel()
 		source := `$version: "2.0"
@@ -308,6 +309,7 @@ func TestOptionalFormattedTimestamp(t *testing.T) {
 
 func TestOptionalValidation(t *testing.T) {
 	skipIfShort(t)
+	t.Parallel()
 	m := assembleProtocolSources(t, `$version: "2.0"
 namespace tdd
 
