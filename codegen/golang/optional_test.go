@@ -3,8 +3,10 @@ package golang
 import (
 	"context"
 	"fmt"
+	"go/version"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -12,6 +14,13 @@ import (
 	"github.com/tespeleta/gosmithy/model"
 	"github.com/tespeleta/gosmithy/protocol/httpjson"
 )
+
+func skipIfNoOptionalToolchain(t *testing.T) {
+	t.Helper()
+	if version.Compare(version.Lang(runtime.Version()), "go1.24") < 0 {
+		t.Skip("Optional[T] requires Go 1.24 or newer")
+	}
+}
 
 func runOptionalProtocolGenerator(t *testing.T, m *model.Model, service model.ShapeID, module string) ([]codegen.File, []codegen.Diagnostic, error) {
 	t.Helper()
@@ -46,11 +55,14 @@ func runOptionalContract(t *testing.T, source, testSrc, run string) {
 	if err := os.WriteFile(filepath.Join(dir, "optional_test.go"), []byte(testSrc), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	runGo(t, dir, "test", "-count=1", "-run", run, ".")
+	runGo(t, dir, "test", "-run", run, ".")
 }
 
 func TestOptionalContracts(t *testing.T) {
+	skipIfShort(t)
+	t.Parallel()
 	t.Run("scalars", func(t *testing.T) {
+		t.Parallel()
 		source := `$version: "2.0"
 namespace tdd
 
@@ -151,6 +163,7 @@ func TestOptionalScalars(t *testing.T) {
 	})
 
 	t.Run("relaxed", func(t *testing.T) {
+		t.Parallel()
 		source := `$version: "2.0"
 namespace tdd
 
@@ -228,6 +241,7 @@ func TestOptionalRelaxed(t *testing.T) {
 	})
 
 	t.Run("formatted_timestamp", func(t *testing.T) {
+		t.Parallel()
 		source := `$version: "2.0"
 namespace tdd
 
@@ -294,6 +308,8 @@ func TestOptionalFormattedTimestamp(t *testing.T) {
 }
 
 func TestOptionalValidation(t *testing.T) {
+	skipIfShort(t)
+	t.Parallel()
 	m := assembleProtocolSources(t, `$version: "2.0"
 namespace tdd
 
@@ -354,7 +370,7 @@ func TestOptionalValidationRules(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "types", "optional_validate_test.go"), []byte(testSrc), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	runGo(t, dir, "test", "-count=1", "-run", "TestOptionalValidationRules", "./types")
+	runGo(t, dir, "test", "-run", "TestOptionalValidationRules", "./types")
 }
 
 func TestUseOptionalsFalse(t *testing.T) {

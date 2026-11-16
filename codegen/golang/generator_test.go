@@ -20,6 +20,14 @@ import (
 
 var updateGolden = flag.Bool("update", false, "update golden files")
 
+// skipIfShort skips tests that write and compile generated Go modules.
+func skipIfShort(t *testing.T) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("skipping generated-module compilation in -short mode")
+	}
+}
+
 type goldenCase struct {
 	name    string
 	fixture string
@@ -51,6 +59,7 @@ var goldenCases = []goldenCase{
 func TestGolden(t *testing.T) {
 	for _, tc := range goldenCases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			m := loadFixture(t, tc.fixture)
 			requireValid(t, m)
 			files, diags, err := runGenerator(t, m, tc.service, tc.module, nil)
@@ -135,6 +144,8 @@ func TestGeneratedGoModHasNoDependencies(t *testing.T) {
 }
 
 func TestGeneratedValidatorBehavior(t *testing.T) {
+	skipIfShort(t)
+	t.Parallel()
 	m := loadFixture(t, "../../testdata/validators.smithy")
 	files, _, err := runGenerator(t, m, model.MustShapeID("example.codegen#Example"), "example.com/codegen", nil)
 	if err != nil {
@@ -440,10 +451,7 @@ func runGo(t *testing.T, dir string, args ...string) {
 	cmd := exec.Command("go", args...)
 	cmd.Dir = dir
 	env := os.Environ()
-	if os.Getenv("GOCACHE") == "" {
-		env = append(env, "GOCACHE="+t.TempDir())
-	}
-	env = append(env, "GOWORK=off")
+	env = append(env, "GOFLAGS=", "GOWORK=off")
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	if err != nil {

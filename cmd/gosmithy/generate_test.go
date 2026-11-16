@@ -280,10 +280,7 @@ func runGoCommand(t *testing.T, dir string, args ...string) {
 	cmd := exec.Command("go", args...)
 	cmd.Dir = dir
 	env := os.Environ()
-	if os.Getenv("GOCACHE") == "" {
-		env = append(env, "GOCACHE="+t.TempDir())
-	}
-	env = append(env, "GOWORK=off")
+	env = append(env, "GOFLAGS=", "GOWORK=off")
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	if err != nil {
