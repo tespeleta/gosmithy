@@ -181,6 +181,7 @@ func runProtocolGenerator(t *testing.T, m *model.Model, service model.ShapeID, m
 }
 
 func TestGeneratedProtocolRoundTrip(t *testing.T) {
+	requireIntegration(t)
 	m := loadProtocolFixture(t, "../../testdata/http.smithy")
 	requireValid(t, m)
 	files, diags, err := runProtocolGenerator(t, m, model.MustShapeID("example.http#HttpJson"), "example.com/http")
@@ -1111,6 +1112,7 @@ func TestProtocolGeneratedGoModHasNoDependencies(t *testing.T) {
 }
 
 func TestProtocolEmptyServiceCompiles(t *testing.T) {
+	requireIntegration(t)
 	m := assembleProtocolSources(t, `$version: "2.0"
 namespace example.empty
 
@@ -1135,6 +1137,7 @@ service EmptyService {}
 }
 
 func TestProtocolBlobOnlyServiceCompiles(t *testing.T) {
+	requireIntegration(t)
 	m := assembleProtocolSources(t, `$version: "2.0"
 namespace example.blob
 

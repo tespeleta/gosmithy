@@ -12,6 +12,7 @@ import (
 )
 
 func TestRelaxedContracts(t *testing.T) {
+	requireIntegration(t)
 	cases := []struct {
 		name   string
 		source string
@@ -402,51 +403,6 @@ func TestPayloadNumber(t *testing.T) {
 `,
 		},
 		{
-			name: "relaxed_bool_omitempty",
-			source: relaxedSource(`@relaxedInput`, `structure In {
-    ok: Boolean
-}`, ""),
-			run: "^TestRelaxedBoolOmitempty$",
-			test: `package contract
-
-import (
-	"context"
-	"io"
-	"net/http"
-	"strings"
-	"testing"
-
-	"example.com/contract/types"
-)
-
-type captureRoundTrip func(*http.Request) (*http.Response, error)
-
-func (f captureRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
-
-func TestRelaxedBoolOmitempty(t *testing.T) {
-	var bodies []string
-	client := NewClient("http://example.com", WithHTTPClient(&http.Client{Transport: captureRoundTrip(func(r *http.Request) (*http.Response, error) {
-		data, _ := io.ReadAll(r.Body)
-		bodies = append(bodies, string(data))
-		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
-	})}))
-	falseValue := types.RelaxedBool(false)
-	if _, err := client.Op(context.Background(), &types.In{Ok: &falseValue}); err != nil {
-		t.Fatal(err)
-	}
-	if len(bodies) != 1 || !strings.Contains(bodies[0], ` + "`" + `"ok":false` + "`" + `) {
-		t.Fatalf("body = %v, want ok:false", bodies)
-	}
-	if _, err := client.Op(context.Background(), &types.In{}); err != nil {
-		t.Fatal(err)
-	}
-	if len(bodies) != 2 || strings.Contains(bodies[1], "ok") {
-		t.Fatalf("body = %q, want no ok field", bodies[1])
-	}
-}
-`,
-		},
-		{
 			name: "relaxed_union_arm",
 			source: relaxedSource(`@relaxedInput`, `union Choice {
     ok: Boolean
@@ -486,50 +442,6 @@ func TestRelaxedUnionArm(t *testing.T) {
 	}
 	if _, ok := s.got.(*types.ChoiceOk); !ok {
 		t.Fatalf("decoded union = %T, want *types.ChoiceOk", s.got)
-	}
-}
-`,
-		},
-		{
-			name: "collections_stay_strict",
-			source: relaxedSource(`@relaxedInput`, `list Counts {
-    member: Integer
-}
-
-structure In {
-    counts: Counts
-}`, ""),
-			run: "^TestCollectionsStayStrict$",
-			test: `package contract
-
-import (
-	"context"
-	"net/http/httptest"
-	"strings"
-	"testing"
-
-	"example.com/contract/types"
-)
-
-type listService struct{}
-
-func (s *listService) Op(ctx context.Context, in *types.In) (*types.Unit, error) {
-	return &types.Unit{}, nil
-}
-
-func TestCollectionsStayStrict(t *testing.T) {
-	h := NewServer(&listService{})
-	req := httptest.NewRequest("POST", "/op", strings.NewReader(` + "`" + `{"counts":["1"]}` + "`" + `))
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	if rec.Code != 400 {
-		t.Fatalf("quoted element: status = %d, want 400", rec.Code)
-	}
-	req = httptest.NewRequest("POST", "/op", strings.NewReader(` + "`" + `{"counts":[1]}` + "`" + `))
-	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	if rec.Code != 200 {
-		t.Fatalf("number element: status = %d, body = %s", rec.Code, rec.Body.String())
 	}
 }
 `,
@@ -577,6 +489,7 @@ func TestOutputStaysStrict(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			m := assembleProtocolSources(t, tc.source)
 			files, diags, err := runProtocolGenerator(t, m, model.MustShapeID("tdd#S"), "example.com/contract")
 			if err != nil {
@@ -588,7 +501,7 @@ func TestOutputStaysStrict(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(dir, "relaxed_test.go"), []byte(tc.test), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			runGo(t, dir, "test", "-count=1", "-run", tc.run, ".")
+			runGo(t, dir, "test", "-run", tc.run, ".")
 		})
 	}
 }

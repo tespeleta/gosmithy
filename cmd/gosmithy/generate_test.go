@@ -9,6 +9,8 @@ import (
 	"testing"
 )
 
+func integrationEnabled() bool { return os.Getenv("GOSMITHY_INTEGRATION") == "1" }
+
 func weatherPath() string { return filepath.Join("..", "..", "testdata", "weather.smithy") }
 
 func TestGenerateWeather(t *testing.T) {
@@ -232,8 +234,10 @@ func TestGenerateLibraryHTTP(t *testing.T) {
 			t.Errorf("missing generated file %s: %v", name, err)
 		}
 	}
-	runGoCommand(t, out, "build", "./...")
-	runGoCommand(t, out, "test", "./...")
+	if integrationEnabled() {
+		runGoCommand(t, out, "build", "./...")
+		runGoCommand(t, out, "test", "./...")
+	}
 }
 
 func TestGenerateProtocolFlagIsRemoved(t *testing.T) {
@@ -280,10 +284,7 @@ func runGoCommand(t *testing.T, dir string, args ...string) {
 	cmd := exec.Command("go", args...)
 	cmd.Dir = dir
 	env := os.Environ()
-	if os.Getenv("GOCACHE") == "" {
-		env = append(env, "GOCACHE="+t.TempDir())
-	}
-	env = append(env, "GOWORK=off")
+	env = append(env, "GOFLAGS=", "GOWORK=off")
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -496,7 +497,9 @@ func TestGenerateMultipleGenerators(t *testing.T) {
 			t.Errorf("missing %s: %v", name, err)
 		}
 	}
-	runGoCommand(t, out, "build", "./...")
+	if integrationEnabled() {
+		runGoCommand(t, out, "build", "./...")
+	}
 }
 
 func TestGenerateSplitHTTPGenerators(t *testing.T) {
@@ -545,7 +548,9 @@ func TestGenerateSplitHTTPGenerators(t *testing.T) {
 					t.Errorf("%s should not be generated", name)
 				}
 			}
-			runGoCommand(t, out, "build", "./...")
+			if integrationEnabled() {
+				runGoCommand(t, out, "build", "./...")
+			}
 		})
 	}
 }
@@ -610,5 +615,7 @@ func TestGenerateOmitsGeneratorSelectsAll(t *testing.T) {
 			t.Errorf("missing %s: %v", name, err)
 		}
 	}
-	runGoCommand(t, out, "build", "./...")
+	if integrationEnabled() {
+		runGoCommand(t, out, "build", "./...")
+	}
 }

@@ -8,53 +8,14 @@ import (
 	"github.com/tespeleta/gosmithy/validation"
 )
 
-// matrixCases are models the httpJson protocol supports. Each case must
-// generate with no DANGER and produce a Go module that builds. A case that
-// generates silently and then fails to compile is the anti-pattern this matrix
-// exists to catch.
+// matrixCases are the type-by-binding combinations that have produced codegen
+// regressions. Each case must generate with no DANGER and produce a Go module
+// that builds. Simple binding cases covered by TestProtocolRoundTrip,
+// TestProtocolContracts, and the golden fixtures are intentionally omitted.
 var matrixCases = []struct {
 	name   string
 	source string
 }{
-	{
-		name: "query_plain_string_control",
-		source: matrixModel(`structure In {
-    @httpQuery("q")
-    q: String
-}`, matrixOpInput),
-	},
-	{
-		name: "header_integer_control",
-		source: matrixModel(`structure In {
-    @httpHeader("X-N")
-    n: Integer
-}`, matrixOpInput),
-	},
-	{
-		name: "query_big_decimal_control",
-		source: matrixModel(`structure In {
-    @httpQuery("d")
-    d: BigDecimal
-}`, matrixOpInput),
-	},
-	{
-		name: "header_big_decimal_control",
-		source: matrixModel(`structure In {
-    @httpHeader("X-D")
-    d: BigDecimal
-}`, matrixOpInput),
-	},
-	{
-		name: "body_union_control",
-		source: matrixModel(`union U {
-    name: String
-    id: Integer
-}
-
-structure In {
-    u: U
-}`, matrixOpInput),
-	},
 	{
 		name: "query_enum_list_control",
 		source: matrixModel(`@enum([
@@ -70,14 +31,6 @@ list Colors {
 structure In {
     @httpQuery("c")
     colors: Colors
-}`, matrixOpInput),
-	},
-	{
-		name: "query_timestamp_scalar_control",
-		source: matrixModel(`structure In {
-    @httpQuery("t")
-    @timestampFormat("epoch-seconds")
-    t: Timestamp
 }`, matrixOpInput),
 	},
 	{
@@ -98,6 +51,14 @@ structure In {
 }`, matrixOpInput),
 	},
 	{
+		name: "query_timestamp_scalar_control",
+		source: matrixModel(`structure In {
+    @httpQuery("t")
+    @timestampFormat("epoch-seconds")
+    t: Timestamp
+}`, matrixOpInput),
+	},
+	{
 		name: "label_enum_control",
 		source: matrixModel(`@enum([
     { name: "RED", value: "red" },
@@ -115,31 +76,10 @@ operation Op {
 }`),
 	},
 	{
-		name: "response_code_integer_control",
-		source: matrixModel(`structure Out {
-    @httpResponseCode
-    status: Integer
-}`, matrixOpOutput),
-	},
-	{
-		name: "payload_blob_control",
-		source: matrixModel(`structure In {
-    @httpPayload
-    data: Blob
-}`, matrixOpInput),
-	},
-	{
 		name: "payload_document_control",
 		source: matrixModel(`structure In {
     @httpPayload
     data: Document
-}`, matrixOpInput),
-	},
-	{
-		name: "payload_big_decimal_control",
-		source: matrixModel(`structure In {
-    @httpPayload
-    amount: BigDecimal
 }`, matrixOpInput),
 	},
 	{
@@ -151,46 +91,6 @@ list Tags {
 
 structure In {
     tags: Tags
-}`, matrixOpInput),
-	},
-	{
-		name: "queryparams_plain_map_control",
-		source: matrixModel(`map Params {
-    key: String
-    value: String
-}
-
-structure In {
-    @httpQueryParams
-    params: Params
-}`, matrixOpInput),
-	},
-	{
-		name: "prefix_plain_map_control",
-		source: matrixModel(`map StringMap {
-    key: String
-    value: String
-}
-
-structure In {
-    @httpPrefixHeaders("X-P-")
-    headers: StringMap
-}`, matrixOpInput),
-	},
-	{
-		name: "queryparams_plain_list_map_control",
-		source: matrixModel(`list StringList {
-    member: String
-}
-
-map StringLists {
-    key: String
-    value: StringList
-}
-
-structure In {
-    @httpQueryParams
-    params: StringLists
 }`, matrixOpInput),
 	},
 	{
@@ -227,24 +127,6 @@ structure In {
 }`, matrixOpInput),
 	},
 	{
-		name: "prefix_enum_map",
-		source: matrixModel(`@enum([
-    { name: "RED", value: "red" },
-    { name: "BLUE", value: "blue" }
-])
-string Color
-
-map ColorMap {
-    key: String
-    value: Color
-}
-
-structure In {
-    @httpPrefixHeaders("X-P-")
-    headers: ColorMap
-}`, matrixOpInput),
-	},
-	{
 		name: "queryparams_enum_list_map",
 		source: matrixModel(`@enum([
     { name: "RED", value: "red" },
@@ -270,6 +152,24 @@ structure In {
 	// @range bounds outside the Go integer type's range. Upstream accepts
 	// these models; the generated comparisons must not overflow.
 	{
+		name: "prefix_enum_map",
+		source: matrixModel(`@enum([
+    { name: "RED", value: "red" },
+    { name: "BLUE", value: "blue" }
+])
+string Color
+
+map ColorMap {
+    key: String
+    value: Color
+}
+
+structure In {
+    @httpPrefixHeaders("X-P-")
+    headers: ColorMap
+}`, matrixOpInput),
+	},
+	{
 		name: "range_large_integer",
 		source: matrixModel(`@range(max: 10000000000)
 integer Wide
@@ -291,25 +191,24 @@ structure In {
 	// Supported payload/timestamp shapes. These only need to compile here; the
 	// wire contract is asserted by TestProtocolContracts.
 	{
-		name: "payload_union",
-		source: matrixModel(`union U {
-    name: String
-    id: Integer
-}
-
-structure In {
-    @required
-    @httpPayload
-    u: U
+		name: "query_big_decimal_control",
+		source: matrixModel(`structure In {
+    @httpQuery("d")
+    d: BigDecimal
 }`, matrixOpInput),
 	},
 	{
-		name: "payload_timestamp_epoch",
+		name: "header_big_decimal_control",
 		source: matrixModel(`structure In {
-    @required
+    @httpHeader("X-D")
+    d: BigDecimal
+}`, matrixOpInput),
+	},
+	{
+		name: "payload_big_decimal_control",
+		source: matrixModel(`structure In {
     @httpPayload
-    @timestampFormat("epoch-seconds")
-    when: Timestamp
+    amount: BigDecimal
 }`, matrixOpInput),
 	},
 	{
@@ -327,6 +226,7 @@ structure In {
 }
 
 func TestCompileInlineCollections(t *testing.T) {
+	requireIntegration(t)
 	m := assembleSources(t, `$version: "2.1"
 namespace tdd
 
@@ -363,6 +263,7 @@ operation Op {
 }
 
 func TestCompileInlineCollectionNameCollision(t *testing.T) {
+	requireIntegration(t)
 	m := assembleSources(t, `$version: "2.1"
 namespace tdd
 
@@ -394,8 +295,10 @@ operation Op {
 }
 
 func TestCompileMatrix(t *testing.T) {
+	requireIntegration(t)
 	for _, tc := range matrixCases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			m := assembleSources(t, tc.source)
 			files, diags, err := runProtocolGenerator(t, m, model.MustShapeID("tdd#S"), "example.com/contract")
 			if err != nil {

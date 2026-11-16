@@ -300,8 +300,10 @@ func TestTimestampListQueryServer(t *testing.T) {
 }
 
 func TestProtocolContracts(t *testing.T) {
+	requireIntegration(t)
 	for _, tc := range protocolContracts {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			m := assembleSources(t, tc.source)
 			files, diags, err := runProtocolGenerator(t, m, model.MustShapeID("tdd#S"), "example.com/contract")
 			if err != nil {
@@ -313,7 +315,7 @@ func TestProtocolContracts(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(dir, "wire_test.go"), []byte(tc.test), 0o644); err != nil {
 				t.Fatalf("write wire_test.go: %v", err)
 			}
-			runGo(t, dir, "test", "-count=1", "-run", tc.run, ".")
+			runGo(t, dir, "test", "-run", tc.run, ".")
 		})
 	}
 }

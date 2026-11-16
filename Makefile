@@ -18,7 +18,7 @@ LDFLAGS   ?= -s -w -X main.version=$(VERSION)
 
 GOFILES := $(shell find . -name '*.go' -not -path './$(BIN_DIR)/*')
 
-.PHONY: all build test test-race vet fmt fmt-check check fuzz run install clean help
+.PHONY: all build test test-fast test-integration test-race vet fmt fmt-check check fuzz run install clean help
 
 all: build
 
@@ -27,7 +27,13 @@ build:
 	$(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $(BIN) ./cmd/gosmithy
 
 test:
+	GOSMITHY_INTEGRATION=1 $(GO) test ./...
+
+test-fast:
 	$(GO) test ./...
+
+test-integration:
+	GOSMITHY_INTEGRATION=1 $(GO) test ./...
 
 test-race:
 	$(GO) test -race ./...
@@ -66,7 +72,9 @@ help:
 		'' \
 		'Targets:' \
 		'  build      Build $(BIN) (default)' \
-		'  test       Run all tests' \
+		'  test       Run all tests, including generated-module compilation'
+		'  test-fast  Run tests without generated-module compilation'
+		'  test-integration  Run tests with GOSMITHY_INTEGRATION=1' \
 		'  test-race  Run all tests with the race detector' \
 		'  vet        Run go vet' \
 		'  fmt        Format Go sources' \
